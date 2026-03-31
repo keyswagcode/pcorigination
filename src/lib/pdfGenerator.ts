@@ -1,3 +1,229 @@
+import jsPDF from 'jspdf';
+
+// ============================================
+// Real PDF Pre-Approval Letter Generator
+// ============================================
+
+export interface PreApprovalPdfOptions {
+  orgName: string;
+  orgLogoUrl: string | null;
+  borrowerName: string;
+  preApprovalAmount: number;
+  loanType: string;
+  verifiedLiquidity: number;
+  creditScore: number | null;
+  expirationDate: string;
+  brokerName: string;
+  issueDate: string;
+  conditions: string[];
+}
+
+const LOAN_TYPE_DISPLAY: Record<string, string> = {
+  dscr: 'DSCR Rental Loan',
+  fix_flip: 'Fix & Flip Loan',
+  bridge: 'Bridge Loan',
+};
+
+async function loadImageAsBase64(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function generatePreApprovalPdf(opts: PreApprovalPdfOptions): Promise<void> {
+  const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 50;
+  const contentWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  const fmtCurrency = (n: number) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
+
+  // --- HEADER ---
+  // Try to load org logo
+  if (opts.orgLogoUrl) {
+    const logoBase64 = await loadImageAsBase64(opts.orgLogoUrl);
+    if (logoBase64) {
+      try {
+        doc.addImage(logoBase64, 'PNG', margin, y, 60, 60);
+      } catch { /* skip logo if unsupported format */ }
+    }
+  }
+
+  doc.setFontSize(22);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(13, 148, 136); // teal-600
+  doc.text(opts.orgName || 'Loan Pre-Approval', opts.orgLogoUrl ? margin + 72 : margin, y + 22);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139); // gray-500
+  doc.text('Pre-Approval Letter', opts.orgLogoUrl ? margin + 72 : margin, y + 38);
+
+  // Date on right
+  doc.setFontSize(10);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Issued: ${opts.issueDate}`, pageWidth - margin, y + 22, { align: 'right' });
+  doc.text(`Valid Until: ${opts.expirationDate}`, pageWidth - margin, y + 38, { align: 'right' });
+
+  y += 70;
+
+  // Divider
+  doc.setDrawColor(13, 148, 136);
+  doc.setLineWidth(2);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 30;
+
+  // --- GREETING ---
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(30, 30, 46);
+  doc.text(`Dear ${opts.borrowerName},`, margin, y);
+  y += 24;
+
+  doc.setFontSize(11);
+  doc.setTextColor(71, 85, 105);
+  const introText = 'We are pleased to inform you that based on the information provided and our underwriting analysis, you have been pre-approved for financing under the following terms:';
+  const introLines = doc.splitTextToSize(introText, contentWidth);
+  doc.text(introLines, margin, y);
+  y += introLines.length * 16 + 16;
+
+  // --- PRE-APPROVAL AMOUNT BOX ---
+  const boxHeight = 80;
+  doc.setFillColor(240, 253, 250); // teal-50
+  doc.setDrawColor(13, 148, 136);
+  doc.setLineWidth(1.5);
+  doc.roundedRect(margin, y, contentWidth, boxHeight, 8, 8, 'FD');
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 118, 110);
+  doc.text('PRE-APPROVED LOAN AMOUNT', pageWidth / 2, y + 22, { align: 'center' });
+
+  doc.setFontSize(36);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(13, 148, 136);
+  doc.text(fmtCurrency(opts.preApprovalAmount), pageWidth / 2, y + 56, { align: 'center' });
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(LOAN_TYPE_DISPLAY[opts.loanType] || opts.loanType, pageWidth / 2, y + 72, { align: 'center' });
+
+  y += boxHeight + 24;
+
+  // --- DETAILS SECTION ---
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 118, 110);
+  doc.text('DETAILS', margin, y);
+  y += 6;
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 18;
+
+  const details = [
+    ['Loan Type', LOAN_TYPE_DISPLAY[opts.loanType] || opts.loanType],
+    ['Verified Liquidity', fmtCurrency(opts.verifiedLiquidity)],
+    ['Estimated Credit Score', opts.creditScore ? `${opts.creditScore}` : 'Not provided'],
+    ['Broker', opts.brokerName],
+  ];
+
+  doc.setFontSize(10);
+  const colWidth = contentWidth / 2;
+  for (let i = 0; i < details.length; i += 2) {
+    for (let j = 0; j < 2 && i + j < details.length; j++) {
+      const [label, value] = details[i + j];
+      const x = margin + j * colWidth;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(label, x, y);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 30, 46);
+      doc.text(value, x, y + 14);
+    }
+    y += 36;
+  }
+
+  // --- CONDITIONS ---
+  if (opts.conditions.length > 0) {
+    y += 4;
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 118, 110);
+    doc.text('CONDITIONS FOR FINAL APPROVAL', margin, y);
+    y += 6;
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 16;
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    for (const condition of opts.conditions) {
+      doc.setTextColor(13, 148, 136);
+      doc.text('✓', margin, y);
+      doc.setTextColor(71, 85, 105);
+      const condLines = doc.splitTextToSize(condition, contentWidth - 20);
+      doc.text(condLines, margin + 16, y);
+      y += condLines.length * 14 + 6;
+    }
+  }
+
+  // --- SIGNATURE ---
+  y += 20;
+  doc.setDrawColor(226, 232, 240);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 20;
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  const disclaimerText = 'This pre-approval is subject to final underwriting review, verification of all submitted documentation, property appraisal, and lender approval.';
+  const discLines = doc.splitTextToSize(disclaimerText, contentWidth);
+  doc.text(discLines, margin, y);
+  y += discLines.length * 14 + 24;
+
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(30, 30, 46);
+  doc.text(opts.brokerName, margin, y);
+  y += 16;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(opts.orgName || 'Lending Partner', margin, y);
+
+  // --- FOOTER ---
+  const footerY = doc.internal.pageSize.getHeight() - 40;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(148, 163, 184);
+  doc.text('This is not a commitment to lend. Rates, terms, and conditions are subject to change without notice.', pageWidth / 2, footerY, { align: 'center' });
+  doc.text('Equal Housing Lender', pageWidth / 2, footerY + 12, { align: 'center' });
+
+  // Download
+  const filename = `Pre-Approval_${opts.loanType}_${opts.borrowerName.replace(/\s+/g, '_')}.pdf`;
+  doc.save(filename);
+}
+
+// ============================================
+// Legacy HTML-based PDF generator (kept for backward compatibility)
+// ============================================
+
 interface PdfOptions {
   borrowerName: string;
   borrowerType: string;

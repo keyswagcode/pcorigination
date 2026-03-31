@@ -7,14 +7,23 @@ import {
   LogOut,
   Menu,
   X,
-  Shield
+  Shield,
+  Settings
 } from 'lucide-react';
 import { useState } from 'react';
 
-const navItems = [
+const brokerNavItems = [
   { to: '/internal/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/internal/borrowers', icon: Users, label: 'Borrower Queue' },
+  { to: '/internal/my-borrowers', icon: Users, label: 'My Borrowers' },
+  { to: '/internal/settings', icon: Settings, label: 'Settings' },
+];
+
+const adminNavItems = [
+  { to: '/internal/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/internal/my-borrowers', icon: Users, label: 'My Borrowers' },
+  { to: '/internal/borrowers', icon: Users, label: 'All Borrowers' },
   { to: '/internal/placerbot', icon: Bot, label: 'PlacerBot' },
+  { to: '/internal/settings', icon: Settings, label: 'Settings' },
 ];
 
 export function InternalLayout() {
@@ -27,6 +36,9 @@ export function InternalLayout() {
     navigate('/login');
   };
 
+  const role = userAccount?.user_role;
+  const navItems = (role === 'reviewer' || role === 'admin') ? adminNavItems : brokerNavItems;
+
   return (
     <div className="min-h-screen bg-gray-100">
       <header className="bg-slate-800 text-white sticky top-0 z-40">
@@ -37,7 +49,7 @@ export function InternalLayout() {
                 <Shield className="w-4 h-4 text-slate-800" />
               </div>
               <span className="text-lg font-semibold hidden sm:block">
-                Internal Credit Platform
+                Loan Platform
               </span>
             </div>
 
@@ -46,6 +58,7 @@ export function InternalLayout() {
                 <NavLink
                   key={to}
                   to={to}
+                  end={to === '/internal/dashboard'}
                   className={({ isActive }) =>
                     `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                       isActive

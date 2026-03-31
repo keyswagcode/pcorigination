@@ -5,11 +5,44 @@ import { TeamProvider } from './components/team/TeamContext';
 import { LoginPage } from './components/auth/LoginPage';
 import { BorrowerLayout } from './layouts/BorrowerLayout';
 import { InternalLayout } from './layouts/InternalLayout';
-import { ApplicationFlowPage } from './pages/borrower/ApplicationFlowPage';
+import { BorrowerHomePage } from './pages/borrower/BorrowerHomePage';
+import { NewLoanPage } from './pages/borrower/NewLoanPage';
 import { InternalDashboardPage } from './pages/internal/InternalDashboardPage';
 import { BorrowerQueuePage } from './pages/internal/BorrowerQueuePage';
 import { BorrowerFilePage } from './pages/internal/BorrowerFilePage';
 import { InternalPlacerBotPage } from './pages/internal/InternalPlacerBotPage';
+import { BorrowerApplyPage } from './pages/BorrowerApplyPage';
+import { BorrowerDocumentsPage } from './pages/borrower/BorrowerDocumentsPage';
+import { BorrowerLoansPage } from './pages/borrower/BorrowerLoansPage';
+import { BrokerDashboardPage } from './pages/broker/BrokerDashboardPage';
+import { BrokerBorrowersPage } from './pages/broker/BrokerBorrowersPage';
+import { BrokerBorrowerDetailPage } from './pages/broker/BrokerBorrowerDetailPage';
+import { BrokerLoanReviewPage } from './pages/broker/BrokerLoanReviewPage';
+import { BrokerSettingsPage } from './pages/broker/BrokerSettingsPage';
+
+function LoginGuard() {
+  const { user, userAccount, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="flex items-center gap-3 text-gray-500">
+          <div className="w-6 h-6 border-2 border-teal-600 border-t-transparent rounded-full animate-spin" />
+          <span>Loading...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (user) {
+    if (userAccount && ['reviewer', 'admin', 'broker'].includes(userAccount.user_role || '')) {
+      return <Navigate to="/internal/dashboard" replace />;
+    }
+    return <Navigate to="/application" replace />;
+  }
+
+  return <LoginPage />;
+}
 
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
   const { user, userAccount, isLoading } = useAuth();
@@ -39,28 +72,23 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
 }
 
 function RoleBasedRedirect() {
-  const { user, userAccount, entityMembership, isLoading } = useAuth();
+  const { user, userAccount, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
     if (!isLoading && user) {
-      console.log({
-        user,
-        entityMembership
-      });
-
-      const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
+const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
 
       if (from && from !== '/login' && from !== '/') {
         navigate(from, { replace: true });
-      } else if (entityMembership) {
+      } else if (userAccount && ['reviewer', 'admin', 'broker'].includes(userAccount.user_role || '')) {
         navigate('/internal/dashboard', { replace: true });
       } else {
-        navigate('/dashboard', { replace: true });
+        navigate('/application', { replace: true });
       }
     }
-  }, [isLoading, user, userAccount, entityMembership, navigate, location]);
+  }, [isLoading, user, userAccount, navigate, location]);
 
   if (isLoading) {
     return (
@@ -97,7 +125,8 @@ function AppRoutes() {
   return (
     <TeamProvider>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<LoginGuard />} />
+        <Route path="/apply/:posSlug" element={<BorrowerApplyPage />} />
         <Route path="/" element={<RoleBasedRedirect />} />
 
         <Route
@@ -108,7 +137,10 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<ApplicationFlowPage />} />
+          <Route index element={<BorrowerHomePage />} />
+          <Route path="documents" element={<BorrowerDocumentsPage />} />
+          <Route path="loans" element={<BorrowerLoansPage />} />
+          <Route path="new-loan" element={<NewLoanPage />} />
         </Route>
 
         <Route path="/borrower" element={<Navigate to="/application" replace />} />
@@ -126,7 +158,11 @@ function AppRoutes() {
           }
         >
           <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<InternalDashboardPage />} />
+          <Route path="dashboard" element={<BrokerDashboardPage />} />
+          <Route path="my-borrowers" element={<BrokerBorrowersPage />} />
+          <Route path="my-borrowers/:borrowerId" element={<BrokerBorrowerDetailPage />} />
+          <Route path="loans/:loanId/review" element={<BrokerLoanReviewPage />} />
+          <Route path="settings" element={<BrokerSettingsPage />} />
           <Route path="borrowers" element={<BorrowerQueuePage />} />
           <Route path="borrowers/:borrowerId" element={<BorrowerFilePage />} />
           <Route path="placerbot" element={<InternalPlacerBotPage />} />
