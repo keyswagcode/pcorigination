@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   ArrowLeft, User, FileText, DollarSign, Briefcase, MessageSquare,
   Upload, CheckCircle2, Loader2, Send, Trash2, Download, Eye,
-  Edit3, Save, X, Plus
+  Edit3, Save, X, Plus, Mail, Phone, ExternalLink
 } from 'lucide-react';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
 
@@ -460,6 +460,27 @@ export function BrokerBorrowerDetailPage() {
               {borrower.borrower_status || 'Draft'}
             </span>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {borrower.email && (
+            <a href={`mailto:${borrower.email}`}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              title={`Email ${borrower.borrower_name}`}>
+              <Mail className="w-4 h-4" /> Email
+            </a>
+          )}
+          {borrower.phone && (
+            <a href={`sms:${borrower.phone}`}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              title={`Text ${borrower.borrower_name}`}>
+              <Phone className="w-4 h-4" /> Text
+            </a>
+          )}
+          <a href="https://keyrealestatecapital.com/calculator" target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
+            title="Pricing Calculator">
+            <ExternalLink className="w-4 h-4" /> Calculator
+          </a>
         </div>
       </div>
 
