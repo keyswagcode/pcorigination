@@ -32,6 +32,7 @@ interface UploadedDoc {
   document_type: string;
   document_subtype: string | null;
   file_name: string;
+  file_path: string;
   processing_status: string;
   created_at: string;
 }
@@ -101,7 +102,7 @@ export function BrokerBorrowerDetailPage() {
 
     const [bRes, dRes, paRes, lRes, nRes, aRes] = await Promise.all([
       supabase.from('borrowers').select('*').eq('id', borrowerId).maybeSingle(),
-      supabase.from('uploaded_documents').select('id, document_type, document_subtype, file_name, processing_status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
+      supabase.from('uploaded_documents').select('id, document_type, document_subtype, file_name, file_path, processing_status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('pre_approvals').select('id, loan_type, prequalified_amount, status, verified_liquidity').eq('borrower_id', borrowerId),
       supabase.from('loan_scenarios').select('id, scenario_name, loan_type, loan_purpose, loan_amount, ltv, status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('borrower_notes').select('id, content, user_id, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
