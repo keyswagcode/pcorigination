@@ -297,7 +297,27 @@ export function BorrowerApplyPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">Password</label>
+                    {!isSignUp && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!email) { setError('Enter your email first'); return; }
+                          setError(null);
+                          const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
+                            redirectTo: `${window.location.origin}/reset-password`,
+                          });
+                          if (err) { setError(err.message); return; }
+                          setError(null);
+                          alert('Password reset email sent! Check your inbox.');
+                        }}
+                        className="text-xs text-teal-600 hover:text-teal-800 transition-colors"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}

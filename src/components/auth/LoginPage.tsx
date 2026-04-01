@@ -9,6 +9,26 @@ export function LoginPage() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) { setError('Please enter your email address'); return; }
+    setError(null);
+    setIsLoading(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (resetError) throw resetError;
+      setResetSent(true);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,28 +128,41 @@ export function LoginPage() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-neutral-700 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 pr-11 bg-white border border-neutral-200 rounded-lg text-neutral-950 text-sm placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-950 focus:border-transparent transition-shadow"
-                  placeholder="Enter your password"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-600 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+            {!showResetPassword && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-neutral-700">
+                    Password
+                  </label>
+                  {!isSignUp && (
+                    <button
+                      type="button"
+                      onClick={() => { setShowResetPassword(true); setError(null); setResetSent(false); }}
+                      className="text-xs text-neutral-500 hover:text-neutral-950 transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 pr-11 bg-white border border-neutral-200 rounded-lg text-neutral-950 text-sm placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-950 focus:border-transparent transition-shadow"
+                    placeholder="Enter your password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-600 transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {error && (
               <div className="px-4 py-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">
@@ -137,32 +170,63 @@ export function LoginPage() {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-3 px-4 bg-neutral-950 text-white font-medium rounded-lg hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-neutral-950 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
-            >
-              {isLoading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>{isSignUp ? 'Creating account...' : 'Signing in...'}</span>
-                </>
-              ) : (
-                <>
-                  <span>{isSignUp ? 'Create account' : 'Sign in'}</span>
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-                </>
-              )}
-            </button>
+            {!showResetPassword ? (
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3 px-4 bg-neutral-950 text-white font-medium rounded-lg hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-neutral-950 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>{isSignUp ? 'Creating account...' : 'Signing in...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{isSignUp ? 'Create account' : 'Sign in'}</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  </>
+                )}
+              </button>
+            ) : resetSent ? (
+              <div className="px-4 py-3 bg-green-50 border border-green-100 rounded-lg text-sm text-green-700">
+                Password reset email sent! Check your inbox and follow the link to reset your password.
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleResetPassword}
+                disabled={isLoading || !email}
+                className="w-full py-3 px-4 bg-neutral-950 text-white font-medium rounded-lg hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-neutral-950 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Sending...</span>
+                  </>
+                ) : (
+                  <span>Send Reset Link</span>
+                )}
+              </button>
+            )}
           </form>
 
           <div className="mt-8 pt-6 border-t border-neutral-200">
-            <button
-              onClick={() => { setIsSignUp(!isSignUp); setError(null); }}
-              className="text-sm text-neutral-600 hover:text-neutral-950 transition-colors"
-            >
-              {isSignUp ? 'Already have an account? Sign in' : "Need an account? Contact administrator"}
-            </button>
+            {showResetPassword ? (
+              <button
+                onClick={() => { setShowResetPassword(false); setError(null); setResetSent(false); }}
+                className="text-sm text-neutral-600 hover:text-neutral-950 transition-colors"
+              >
+                Back to sign in
+              </button>
+            ) : (
+              <button
+                onClick={() => { setIsSignUp(!isSignUp); setError(null); }}
+                className="text-sm text-neutral-600 hover:text-neutral-950 transition-colors"
+              >
+                {isSignUp ? 'Already have an account? Sign in' : "Need an account? Contact administrator"}
+              </button>
+            )}
           </div>
 
           <p className="text-xs text-neutral-400 mt-8">

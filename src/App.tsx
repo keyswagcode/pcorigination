@@ -20,6 +20,7 @@ import { BrokerBorrowersPage } from './pages/broker/BrokerBorrowersPage';
 import { BrokerBorrowerDetailPage } from './pages/broker/BrokerBorrowerDetailPage';
 import { BrokerLoanReviewPage } from './pages/broker/BrokerLoanReviewPage';
 import { BrokerSettingsPage } from './pages/broker/BrokerSettingsPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 
 function LoginGuard() {
   const { user, userAccount, isLoading } = useAuth();
@@ -127,6 +128,7 @@ function AppRoutes() {
     <TeamProvider>
       <Routes>
         <Route path="/login" element={<LoginGuard />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/apply/:posSlug" element={<BorrowerApplyPage />} />
         <Route path="/" element={<RoleBasedRedirect />} />
 
