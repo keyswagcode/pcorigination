@@ -46,7 +46,14 @@ export function BrokerBorrowersPage() {
   const [addPhone, setAddPhone] = useState('');
   const [addCreditScore, setAddCreditScore] = useState('');
   const [addEntityType, setAddEntityType] = useState('individual');
+  const [addDob, setAddDob] = useState('');
+  const [addStreet, setAddStreet] = useState('');
+  const [addCity, setAddCity] = useState('');
+  const [addState, setAddState] = useState('');
+  const [addZip, setAddZip] = useState('');
   const [adding, setAdding] = useState(false);
+
+  const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 
   // CSV upload
   const [showCsvUpload, setShowCsvUpload] = useState(false);
@@ -78,12 +85,18 @@ export function BrokerBorrowersPage() {
         phone: addPhone.replace(/\D/g, '') || null,
         credit_score: addCreditScore ? parseInt(addCreditScore) : null,
         entity_type: addEntityType,
+        date_of_birth: addDob || null,
+        address_street: addStreet || null,
+        address_city: addCity || null,
+        address_state: addState || null,
+        address_zip: addZip || null,
+        state_of_residence: addState || null,
         borrower_status: 'draft',
         lifecycle_stage: 'profile_created',
       });
       if (error) throw error;
       setAddName(''); setAddEmail(''); setAddPhone(''); setAddCreditScore('');
-      setAddEntityType('individual');
+      setAddEntityType('individual'); setAddDob(''); setAddStreet(''); setAddCity(''); setAddState(''); setAddZip('');
       setShowAddForm(false);
       await loadData();
     } catch (err) {
@@ -231,6 +244,27 @@ export function BrokerBorrowersPage() {
                   {label}
                 </button>
               ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Date of Birth</label>
+            <input type="date" value={addDob} onChange={e => setAddDob(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Residential Address</label>
+            <input type="text" value={addStreet} onChange={e => setAddStreet(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600 mb-2" placeholder="Street address" />
+            <div className="grid grid-cols-6 gap-2">
+              <input type="text" value={addCity} onChange={e => setAddCity(e.target.value)}
+                className="col-span-3 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="City" />
+              <select value={addState} onChange={e => setAddState(e.target.value)}
+                className="col-span-1 px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600">
+                <option value="">ST</option>
+                {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <input type="text" value={addZip} onChange={e => setAddZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                className="col-span-2 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="Zip" />
             </div>
           </div>
           <div className="flex gap-2 pt-1">
