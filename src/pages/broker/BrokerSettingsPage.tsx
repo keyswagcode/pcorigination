@@ -5,6 +5,7 @@ import {
   Link2, Copy, Check, Save, Upload, Image, Loader2, AlertCircle, CheckCircle2,
   UserPlus, Users, Trash2, Shield
 } from 'lucide-react';
+import { inviteTeamMember } from '../../services/teamInviteService';
 
 export function BrokerSettingsPage() {
   const { user, userAccount } = useAuth();
@@ -89,28 +90,17 @@ export function BrokerSettingsPage() {
     setInviteResult(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
-
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-team-member`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          email: inviteEmail,
-          first_name: inviteFirstName,
-          last_name: inviteLastName,
-          broker_role: inviteRole,
-          organization_id: orgId,
-        }),
+      const result = await inviteTeamMember({
+        email: inviteEmail,
+        firstName: inviteFirstName,
+        lastName: inviteLastName,
+        brokerRole: inviteRole,
+        organizationId: orgId,
       });
 
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || 'Failed to invite');
+      if (!result.success) throw new Error(result.error || 'Failed to invite');
 
-      setInviteResult({ email: inviteEmail, tempPassword: result.temp_password });
+      setInviteResult({ email: inviteEmail, tempPassword: result.tempPassword });
       setSuccess(`Invited ${inviteFirstName} ${inviteLastName} as ${inviteRole.toUpperCase()}`);
       setTimeout(() => setSuccess(null), 5000);
       setInviteEmail('');
