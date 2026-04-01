@@ -61,6 +61,8 @@ export function BrokerDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [search, setSearch] = useState('');
+  const [dragBorrowerId, setDragBorrowerId] = useState<string | null>(null);
+  const [dragOverStage, setDragOverStage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -97,6 +99,34 @@ export function BrokerDashboardPage() {
     }
     loadData();
   }, [user]);
+
+  const handleDrop = async (borrowerId: string, newStage: string) => {
+    setDragBorrowerId(null);
+    setDragOverStage(null);
+
+    // Optimistic update
+    setBorrowers(prev => prev.map(b =>
+      b.id === borrowerId ? { ...b, lifecycle_stage: newStage } : b
+    ));
+
+    // Save to DB
+    await supabase.from('borrowers')
+      .update({ lifecycle_stage: newStage })
+      .eq('id', borrowerId);
+
+    // Log activity
+    const borrower = borrowers.find(b => b.id === borrowerId);
+    const stageLabel = PIPELINE_STAGES.find(s => s.key === newStage)?.label || newStage;
+    if (borrower && user) {
+      supabase.from('borrower_activity_log').insert({
+        borrower_id: borrowerId,
+        user_id: user.id,
+        event_type: 'stage_changed',
+        title: `Moved to ${stageLabel}`,
+        details: `Pipeline stage changed to ${stageLabel}`,
+      });
+    }
+  };
 
   const posSlug = userAccount?.pos_slug;
   const posUrl = posSlug ? `${window.location.origin}/apply/${posSlug}` : null;
@@ -155,32 +185,73 @@ export function BrokerDashboardPage() {
         </div>
       )}
 
-      {/* Pipeline Kanban */}
+      {/* Pipeline Kanban - Drag & Drop */}
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-3">Pipeline</h2>
         <div className="grid grid-cols-6 gap-3">
           {PIPELINE_STAGES.map(stage => {
             const count = pipelineCounts[stage.key];
             const stageBorrowers = borrowers.filter(b => (b.lifecycle_stage || 'profile_created') === stage.key);
+            const isOver = dragOverStage === stage.key;
 
             return (
-              <div key={stage.key} className="border border-gray-200 rounded-xl bg-white overflow-hidden">
-                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-700">{stage.label}</span>
-                  <span className="text-sm font-bold text-gray-900">{count}</span>
+              <div
+                key={stage.key}
+                className={`border-2 rounded-xl overflow-hidden transition-colors ${
+                  isOver ? 'border-teal-500 bg-teal-50/50' : 'border-gray-200 bg-white'
+                }`}
+                onDragOver={e => { e.preventDefault(); setDragOverStage(stage.key); }}
+                onDragEnter={e => { e.preventDefault(); setDragOverStage(stage.key); }}
+                onDragLeave={e => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = e.clientX; const y = e.clientY;
+                  if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+                    setDragOverStage(null);
+                  }
+                }}
+                onDrop={e => {
+                  e.preventDefault();
+                  const id = e.dataTransfer.getData('borrowerId');
+                  if (id) handleDrop(id, stage.key);
+                }}
+              >
+                <div className={`px-4 py-3 border-b flex items-center justify-between ${
+                  isOver ? 'bg-teal-100 border-teal-200' : 'bg-gray-50 border-gray-200'
+                }`}>
+                  <span className={`text-sm font-medium ${isOver ? 'text-teal-800' : 'text-gray-700'}`}>{stage.label}</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                    isOver ? 'bg-teal-200 text-teal-800' : 'bg-gray-200 text-gray-700'
+                  }`}>{count}</span>
                 </div>
-                <div className="p-2 space-y-2 min-h-[100px] max-h-[300px] overflow-y-auto">
+                <div className={`p-2 space-y-2 min-h-[120px] max-h-[400px] overflow-y-auto ${
+                  isOver && stageBorrowers.length === 0 ? 'flex items-center justify-center' : ''
+                }`}>
+                  {isOver && stageBorrowers.length === 0 && (
+                    <p className="text-xs text-teal-600 font-medium">Drop here</p>
+                  )}
                   {stageBorrowers.map(b => (
-                    <Link
+                    <div
                       key={b.id}
-                      to={`/internal/my-borrowers/${b.id}`}
-                      className="block p-3 bg-gray-50 hover:bg-teal-50 rounded-lg transition-colors"
+                      draggable
+                      onDragStart={e => {
+                        setDragBorrowerId(b.id);
+                        e.dataTransfer.setData('borrowerId', b.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragEnd={() => { setDragBorrowerId(null); setDragOverStage(null); }}
+                      className={`p-3 rounded-lg cursor-grab active:cursor-grabbing transition-all ${
+                        dragBorrowerId === b.id
+                          ? 'opacity-40 bg-gray-100'
+                          : 'bg-gray-50 hover:bg-teal-50 hover:shadow-sm'
+                      }`}
                     >
-                      <p className="text-sm font-medium text-gray-900 truncate">{b.borrower_name}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{b.credit_score ? `${b.credit_score} CS` : 'No CS'}</p>
-                    </Link>
+                      <Link to={`/internal/my-borrowers/${b.id}`} className="block" onClick={e => { if (dragBorrowerId) e.preventDefault(); }}>
+                        <p className="text-sm font-medium text-gray-900 truncate">{b.borrower_name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{b.credit_score ? `${b.credit_score} CS` : 'No CS'}</p>
+                      </Link>
+                    </div>
                   ))}
-                  {stageBorrowers.length === 0 && (
+                  {stageBorrowers.length === 0 && !isOver && (
                     <p className="text-xs text-gray-400 text-center py-4">None</p>
                   )}
                 </div>
