@@ -321,7 +321,24 @@ export function BrokerBorrowerDetailPage() {
         </div>
       )}
 
-      {activeTab === 'documents' && (
+      {activeTab === 'documents' && (() => {
+        const allCategories = [
+          { key: 'drivers_license', label: "Driver's License / Passport", always: true },
+          { key: 'voided_check', label: 'Voided Check', always: true },
+          { key: 'property_insurance', label: 'Property Insurance', always: true },
+          { key: 'appraisal', label: 'Appraisal', always: true },
+          { key: 'lease', label: 'Lease', always: false, condition: borrower.entity_type !== 'individual' || documents.some(d => d.document_type === 'lease') },
+          { key: 'articles_of_incorporation', label: 'Articles of Incorporation', always: false, condition: borrower.entity_type !== 'individual' },
+          { key: 'ein_letter', label: 'EIN Letter', always: false, condition: borrower.entity_type !== 'individual' },
+          { key: 'operating_agreement', label: 'Operating Agreement', always: false, condition: borrower.entity_type !== 'individual' },
+          { key: 'rehab_budget', label: 'Rehab Budget', always: false, condition: loans.some(l => l.loan_type === 'fix_flip' || l.loan_type === 'bridge') },
+          { key: 'flip_experience', label: 'Flip Experience Sheet', always: false, condition: loans.some(l => l.loan_type === 'fix_flip' || l.loan_type === 'bridge') },
+        ].filter(c => c.always || c.condition);
+
+        const uploadedTypes = new Set(documents.map(d => d.document_type));
+        const missingDocs = allCategories.filter(c => !uploadedTypes.has(c.key));
+
+        return (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Documents</h2>
@@ -385,8 +402,24 @@ export function BrokerBorrowerDetailPage() {
               ))}
             </div>
           )}
+
+          {/* Missing Documents */}
+          {missingDocs.length > 0 && (
+            <div className="border border-amber-200 rounded-xl bg-amber-50 p-5">
+              <h3 className="text-sm font-semibold text-amber-800 mb-3">Not Yet Uploaded ({missingDocs.length})</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {missingDocs.map(doc => (
+                  <div key={doc.key} className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-amber-100">
+                    <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+                    <span className="text-sm text-gray-700">{doc.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {activeTab === 'preapprovals' && (
         <div className="space-y-3">
