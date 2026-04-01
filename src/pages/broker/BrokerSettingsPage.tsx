@@ -408,21 +408,57 @@ export function BrokerSettingsPage() {
 
         {/* Invite result with temp password */}
         {inviteResult && (
-          <div className="mb-4 px-4 py-4 bg-teal-50 border border-teal-100 rounded-lg">
-            <p className="text-sm font-medium text-teal-800 mb-2">Invite sent to {inviteResult.email}</p>
-            <div className="bg-white rounded-lg px-3 py-2 border border-teal-200">
-              <p className="text-xs text-gray-500">Temporary Password (share with team member):</p>
-              <div className="flex items-center justify-between mt-1">
-                <code className="text-sm font-mono text-gray-900">{inviteResult.tempPassword}</code>
-                <button
-                  onClick={() => { navigator.clipboard.writeText(inviteResult.tempPassword); }}
-                  className="text-xs text-teal-600 hover:text-teal-800"
-                >
-                  Copy
+          <div className="mb-4 px-5 py-5 bg-teal-50 border-2 border-teal-200 rounded-xl">
+            <div className="flex items-center gap-2 mb-3">
+              <CheckCircle2 className="w-5 h-5 text-teal-600" />
+              <p className="text-sm font-semibold text-teal-800">Account created for {inviteResult.email}</p>
+            </div>
+            <p className="text-xs text-teal-700 mb-3">Share these login credentials with the team member:</p>
+
+            <div className="bg-white rounded-lg border border-teal-200 divide-y divide-teal-100">
+              <div className="px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500">Login URL</p>
+                  <code className="text-sm text-teal-700">{window.location.origin}/login</code>
+                </div>
+                <button onClick={() => navigator.clipboard.writeText(`${window.location.origin}/login`)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-teal-600 bg-teal-50 rounded hover:bg-teal-100">
+                  <Copy className="w-3 h-3" /> Copy
+                </button>
+              </div>
+              <div className="px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500">Email</p>
+                  <code className="text-sm text-gray-900">{inviteResult.email}</code>
+                </div>
+                <button onClick={() => navigator.clipboard.writeText(inviteResult.email)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-teal-600 bg-teal-50 rounded hover:bg-teal-100">
+                  <Copy className="w-3 h-3" /> Copy
+                </button>
+              </div>
+              <div className="px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-500">Temporary Password</p>
+                  <code className="text-sm font-bold text-gray-900">{inviteResult.tempPassword}</code>
+                </div>
+                <button onClick={() => navigator.clipboard.writeText(inviteResult.tempPassword)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-teal-600 bg-teal-50 rounded hover:bg-teal-100">
+                  <Copy className="w-3 h-3" /> Copy
                 </button>
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">They will be prompted to change their password on first login.</p>
+
+            <button
+              onClick={() => {
+                const text = `Login URL: ${window.location.origin}/login\nEmail: ${inviteResult.email}\nTemporary Password: ${inviteResult.tempPassword}\n\nPlease change your password after logging in.`;
+                navigator.clipboard.writeText(text);
+              }}
+              className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-teal-700 bg-white border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors"
+            >
+              <Copy className="w-4 h-4" /> Copy All Credentials
+            </button>
+
+            <p className="text-xs text-gray-500 mt-3">Note: Email invitations require SMTP configuration. For now, please share credentials manually.</p>
           </div>
         )}
 
