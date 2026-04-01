@@ -199,20 +199,43 @@ export function BorrowerProfilePage() {
               />
             </div>
 
-            <div>
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                State of Residence
+                Residential Address
               </label>
-              <select
-                value={borrower.state_of_residence || ''}
-                onChange={e => setBorrower({ ...borrower, state_of_residence: e.target.value })}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-              >
-                <option value="">Select state</option>
-                {US_STATES.map(state => (
-                  <option key={state} value={state}>{state}</option>
-                ))}
-              </select>
+              <input
+                type="text"
+                value={(borrower as Record<string, unknown>).address_street as string || ''}
+                onChange={e => setBorrower({ ...borrower, address_street: e.target.value } as typeof borrower)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 mb-2"
+                placeholder="Street address"
+              />
+              <div className="grid grid-cols-6 gap-2">
+                <input
+                  type="text"
+                  value={(borrower as Record<string, unknown>).address_city as string || ''}
+                  onChange={e => setBorrower({ ...borrower, address_city: e.target.value } as typeof borrower)}
+                  className="col-span-3 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                  placeholder="City"
+                />
+                <select
+                  value={(borrower as Record<string, unknown>).address_state as string || borrower.state_of_residence || ''}
+                  onChange={e => setBorrower({ ...borrower, address_state: e.target.value, state_of_residence: e.target.value } as typeof borrower)}
+                  className="col-span-1 px-2 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                >
+                  <option value="">ST</option>
+                  {US_STATES.map(state => (
+                    <option key={state} value={state}>{state}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={(borrower as Record<string, unknown>).address_zip as string || ''}
+                  onChange={e => setBorrower({ ...borrower, address_zip: e.target.value.replace(/\D/g, '').slice(0, 5) } as typeof borrower)}
+                  className="col-span-2 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                  placeholder="Zip"
+                />
+              </div>
             </div>
 
             <div>
