@@ -75,6 +75,7 @@ export async function inviteTeamMember(params: {
         display_name: `${params.firstName} ${params.lastName}`,
         email: params.email,
         is_active: true,
+        invite_status: 'pending',
       });
       if (orgError) {
         console.error('Org member insert failed:', orgError);

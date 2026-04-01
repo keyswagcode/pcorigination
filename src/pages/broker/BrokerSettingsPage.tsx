@@ -30,6 +30,7 @@ export function BrokerSettingsPage() {
     display_name: string | null;
     email: string | null;
     role: string | null;
+    invite_status: string | null;
   }
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -63,7 +64,7 @@ export function BrokerSettingsPage() {
         // Load team members
         const { data: members } = await supabase
           .from('organization_members')
-          .select('id, user_id, display_name, email, role')
+          .select('id, user_id, display_name, email, role, invite_status')
           .eq('organization_id', org.id)
           .eq('is_active', true);
         setTeamMembers(members || []);
@@ -77,7 +78,7 @@ export function BrokerSettingsPage() {
     if (!orgId) return;
     const { data } = await supabase
       .from('organization_members')
-      .select('id, user_id, display_name, email, role')
+      .select('id, user_id, display_name, email, role, invite_status')
       .eq('organization_id', orgId)
       .eq('is_active', true);
     setTeamMembers(data || []);
@@ -415,7 +416,12 @@ export function BrokerSettingsPage() {
                     <Shield className="w-4 h-4 text-gray-500" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{member.display_name || member.email}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-gray-900">{member.display_name || member.email}</p>
+                      {member.invite_status === 'pending' && (
+                        <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-700">Pending</span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2">
                       {member.email && <span className="text-xs text-gray-500">{member.email}</span>}
                       <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
