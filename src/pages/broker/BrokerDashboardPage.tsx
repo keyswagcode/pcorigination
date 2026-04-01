@@ -47,10 +47,11 @@ const STAGE_COLORS: Record<string, string> = {
 
 const PIPELINE_STAGES = [
   { key: 'profile_created', label: 'New' },
-  { key: 'documents_uploaded', label: 'Docs Uploaded' },
-  { key: 'liquidity_verified', label: 'Liquidity Verified' },
   { key: 'pre_approved', label: 'Pre-Approved' },
-  { key: 'application_submitted', label: 'Loan Submitted' },
+  { key: 'order_appraisal', label: 'Order Appraisal' },
+  { key: 'underwriting', label: 'Underwriting' },
+  { key: 'ctc', label: 'CTC' },
+  { key: 'closed_won', label: 'Closed Won' },
 ];
 
 export function BrokerDashboardPage() {
@@ -156,7 +157,7 @@ export function BrokerDashboardPage() {
       {/* Pipeline Kanban */}
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-3">Pipeline</h2>
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-6 gap-3">
           {PIPELINE_STAGES.map(stage => {
             const count = pipelineCounts[stage.key];
             const stageBorrowers = borrowers.filter(b => (b.lifecycle_stage || 'profile_created') === stage.key);

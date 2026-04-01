@@ -94,6 +94,9 @@ export function BrokerBorrowerDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>('profile');
   const [isLoading, setIsLoading] = useState(true);
   const [newNote, setNewNote] = useState('');
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [showMentions, setShowMentions] = useState(false);
+  const [teamForMentions, setTeamForMentions] = useState<{ id: string; name: string; email: string }[]>([]);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Borrower>>({});
   const [uploading, setUploading] = useState(false);
@@ -111,7 +114,7 @@ export function BrokerBorrowerDetailPage() {
       supabase.from('uploaded_documents').select('id, document_type, document_subtype, file_name, file_path, processing_status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('pre_approvals').select('id, loan_type, prequalified_amount, status, verified_liquidity').eq('borrower_id', borrowerId),
       supabase.from('loan_scenarios').select('id, scenario_name, loan_type, loan_purpose, loan_amount, ltv, status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
-      supabase.from('borrower_notes').select('id, content, user_id, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
+      supabase.from('borrower_notes').select('id, content, user_id, created_at, user_accounts(first_name, last_name)').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('borrower_activity_log').select('id, event_type, title, details, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }).limit(50),
     ]);
 
@@ -119,8 +122,33 @@ export function BrokerBorrowerDetailPage() {
     setDocuments(dRes.data || []);
     setPreApprovals(paRes.data || []);
     setLoans(lRes.data || []);
-    setNotes(nRes.data || []);
+    setNotes((nRes.data || []).map((n: Record<string, unknown>) => {
+      const ua = n.user_accounts as { first_name: string; last_name: string } | null;
+      return { ...n, user_name: ua ? `${ua.first_name || ''} ${ua.last_name || ''}`.trim() : undefined } as Note;
+    }));
     setActivity(aRes.data || []);
+
+    // Load team members for @ mentions
+    if (user) {
+      const { data: orgMember } = await supabase
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (orgMember?.organization_id) {
+        const { data: members } = await supabase
+          .from('organization_members')
+          .select('user_id, display_name, email')
+          .eq('organization_id', orgMember.organization_id)
+          .eq('is_active', true);
+        setTeamForMentions((members || []).map(m => ({
+          id: m.user_id,
+          name: m.display_name || m.email || '',
+          email: m.email || '',
+        })));
+      }
+    }
+
     setIsLoading(false);
   }, [borrowerId]);
 
@@ -135,12 +163,73 @@ export function BrokerBorrowerDetailPage() {
 
   const handleAddNote = async () => {
     if (!borrower || !newNote.trim() || !user) return;
+    const noteText = newNote.trim();
+
     await supabase.from('borrower_notes').insert({
       borrower_id: borrower.id,
       user_id: user.id,
-      content: newNote.trim(),
+      content: noteText,
     });
+
+    // Detect @mentions and send notifications
+    const mentionPattern = /@(\w[\w\s]*?)(?=\s@|\s*$|[.,!?])/g;
+    const mentions = [...noteText.matchAll(mentionPattern)].map(m => m[1].trim().toLowerCase());
+
+    if (mentions.length > 0) {
+      const { data: authorData } = await supabase
+        .from('user_accounts')
+        .select('first_name, last_name')
+        .eq('id', user.id)
+        .maybeSingle();
+      const authorName = authorData ? `${authorData.first_name} ${authorData.last_name}` : 'A team member';
+
+      for (const mentionName of mentions) {
+        const mentioned = teamForMentions.find(t =>
+          t.name.toLowerCase().includes(mentionName) ||
+          t.email.toLowerCase().includes(mentionName)
+        );
+        if (mentioned && mentioned.id !== user.id) {
+          // In-app notification
+          await supabase.from('notifications').insert({
+            user_id: mentioned.id,
+            event_type: 'note_mention',
+            title: `${authorName} mentioned you`,
+            message: `${authorName} mentioned you in a note on ${borrower.borrower_name}'s file: "${noteText.slice(0, 100)}${noteText.length > 100 ? '...' : ''}"`,
+            priority: 'high',
+            channel: 'in_app',
+            action_url: `/internal/my-borrowers/${borrower.id}`,
+            data: { borrower_id: borrower.id, note_content: noteText },
+          });
+
+          // Fire webhook for email
+          try {
+            const { data: orgMember } = await supabase
+              .from('organization_members')
+              .select('organizations(zapier_webhook_url)')
+              .eq('user_id', user.id)
+              .maybeSingle();
+            const webhookUrl = (orgMember?.organizations as { zapier_webhook_url?: string })?.zapier_webhook_url;
+            if (webhookUrl) {
+              fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  event_type: 'note_mention',
+                  timestamp: new Date().toISOString(),
+                  mentioned_user: { name: mentioned.name, email: mentioned.email },
+                  author: authorName,
+                  borrower: { id: borrower.id, name: borrower.borrower_name },
+                  note: noteText,
+                }),
+              }).catch(() => {});
+            }
+          } catch { /* best effort */ }
+        }
+      }
+    }
+
     setNewNote('');
+    setShowMentions(false);
     await loadData();
   };
 
@@ -739,25 +828,82 @@ export function BrokerBorrowerDetailPage() {
           {/* Notes */}
           <div>
             <h2 className="text-lg font-semibold text-gray-900 mb-3">Internal Notes</h2>
-            <div className="flex gap-2 mb-4">
-              <input
-                type="text"
-                value={newNote}
-                onChange={e => setNewNote(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAddNote()}
-                className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
-                placeholder="Add a note..."
-              />
-              <button onClick={handleAddNote} disabled={!newNote.trim()} className="px-4 py-2.5 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
-                <Send className="w-4 h-4" />
-              </button>
+            <div className="relative mb-4">
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <input
+                    type="text"
+                    value={newNote}
+                    onChange={e => {
+                      setNewNote(e.target.value);
+                      const atMatch = e.target.value.match(/@(\w*)$/);
+                      if (atMatch) {
+                        setMentionSearch(atMatch[1].toLowerCase());
+                        setShowMentions(true);
+                      } else {
+                        setShowMentions(false);
+                      }
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !showMentions) handleAddNote();
+                      if (e.key === 'Escape') setShowMentions(false);
+                    }}
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                    placeholder="Add a note... Use @ to mention a team member"
+                  />
+                  {/* @ mention dropdown */}
+                  {showMentions && (
+                    <div className="absolute bottom-full mb-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-40 overflow-y-auto">
+                      {teamForMentions
+                        .filter(t => !mentionSearch || t.name.toLowerCase().includes(mentionSearch) || t.email.toLowerCase().includes(mentionSearch))
+                        .map(member => (
+                          <button
+                            key={member.id}
+                            className="w-full text-left px-4 py-2 text-sm hover:bg-teal-50 transition-colors flex items-center gap-2"
+                            onClick={() => {
+                              const beforeAt = newNote.replace(/@\w*$/, '');
+                              setNewNote(`${beforeAt}@${member.name} `);
+                              setShowMentions(false);
+                            }}
+                          >
+                            <div className="w-6 h-6 bg-teal-100 rounded-full flex items-center justify-center text-xs font-medium text-teal-700">
+                              {member.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">{member.name}</p>
+                              <p className="text-xs text-gray-500">{member.email}</p>
+                            </div>
+                          </button>
+                        ))}
+                      {teamForMentions.filter(t => !mentionSearch || t.name.toLowerCase().includes(mentionSearch)).length === 0 && (
+                        <p className="px-4 py-2 text-xs text-gray-400">No team members found</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <button onClick={handleAddNote} disabled={!newNote.trim()} className="px-4 py-2.5 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
               {notes.map(note => (
                 <div key={note.id} className="border border-gray-200 rounded-lg bg-white px-4 py-3">
-                  <p className="text-sm text-gray-900">{note.content}</p>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-gray-400">{new Date(note.created_at).toLocaleString()}</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-5 h-5 bg-teal-100 rounded-full flex items-center justify-center">
+                      <span className="text-[10px] font-medium text-teal-700">
+                        {(note.user_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      </span>
+                    </div>
+                    <span className="text-xs font-medium text-gray-700">{note.user_name || 'Unknown'}</span>
+                    <span className="text-xs text-gray-400">&middot; {new Date(note.created_at).toLocaleString()}</span>
+                  </div>
+                  <p className="text-sm text-gray-900">
+                    {note.content.split(/(@\w[\w\s]*?)(?=\s@|\s*$|[.,!?])/).map((part, i) =>
+                      part.startsWith('@') ? <span key={i} className="text-teal-600 font-medium">{part}</span> : part
+                    )}
+                  </p>
+                  <div className="flex justify-end mt-1">
                     {note.user_id === user?.id && (
                       <button onClick={() => handleDeleteNote(note.id)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
                     )}
