@@ -5,8 +5,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   ArrowLeft, User, FileText, DollarSign, Briefcase, MessageSquare,
   Upload, CheckCircle2, Loader2, Send, Trash2, Download, Eye,
-  Edit3, Save, X
+  Edit3, Save, X, Plus
 } from 'lucide-react';
+import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
 
 interface Borrower {
   id: string;
@@ -98,6 +99,9 @@ export function BrokerBorrowerDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null);
+  const [showGeneratePA, setShowGeneratePA] = useState(false);
+  const [paLiquidity, setPaLiquidity] = useState('');
+  const [generatingPA, setGeneratingPA] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!borrowerId) return;
@@ -207,6 +211,97 @@ export function BrokerBorrowerDetailPage() {
       alert('Failed to upload document.');
     } finally {
       setUploadingCategory(null);
+    }
+  };
+
+  const handleGeneratePreApprovals = async () => {
+    if (!borrower || !paLiquidity) return;
+    setGeneratingPA(true);
+    try {
+      const liquidity = parseInt(paLiquidity.replace(/\D/g, '')) || 0;
+      if (liquidity <= 0) return;
+
+      // Upsert financial profile
+      await supabase.from('borrower_financial_profiles').upsert({
+        borrower_id: borrower.id,
+        liquidity_estimate: liquidity,
+        confidence_score: 100,
+        summary: { source: 'broker_manual', total_liquidity: liquidity, verified_at: new Date().toISOString() },
+      }, { onConflict: 'borrower_id' });
+
+      // Delete old pre-approvals
+      await supabase.from('pre_approvals').delete().eq('borrower_id', borrower.id);
+
+      // Generate new ones
+      await supabase.from('pre_approvals').insert([
+        { borrower_id: borrower.id, loan_type: 'dscr', status: 'approved', sub_status: 'pre_approved', prequalified_amount: liquidity * 4, qualification_max: liquidity * 4, verified_liquidity: liquidity, passes_liquidity_check: true, summary: `DSCR Loan: Up to $${(liquidity * 4).toLocaleString()}`, machine_decision: 'approved', machine_confidence: 100 },
+        { borrower_id: borrower.id, loan_type: 'fix_flip', status: 'approved', sub_status: 'pre_approved', prequalified_amount: liquidity * 10, qualification_max: liquidity * 10, verified_liquidity: liquidity, passes_liquidity_check: true, summary: `Fix & Flip: Up to $${(liquidity * 10).toLocaleString()}`, machine_decision: 'approved', machine_confidence: 100 },
+        { borrower_id: borrower.id, loan_type: 'bridge', status: 'approved', sub_status: 'pre_approved', prequalified_amount: liquidity * 5, qualification_max: liquidity * 5, verified_liquidity: liquidity, passes_liquidity_check: true, summary: `Bridge: Up to $${(liquidity * 5).toLocaleString()}`, machine_decision: 'approved', machine_confidence: 100 },
+      ]);
+
+      // Update borrower status
+      await supabase.from('borrowers').update({ lifecycle_stage: 'pre_approved', borrower_status: 'prequalified' }).eq('id', borrower.id);
+
+      setShowGeneratePA(false);
+      setPaLiquidity('');
+      await loadData();
+    } catch (err) {
+      console.error('Generate failed:', err);
+      alert('Failed to generate pre-approvals.');
+    } finally {
+      setGeneratingPA(false);
+    }
+  };
+
+  const handleDownloadPreApprovalPdf = async (pa: PreApproval) => {
+    if (!borrower || !user) return;
+    try {
+      const { data: brokerData } = await supabase
+        .from('user_accounts')
+        .select('first_name, last_name, email, phone')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      let orgName = 'Key Real Estate Capital';
+      let orgLogoUrl: string | null = null;
+      const { data: orgMember } = await supabase
+        .from('organization_members')
+        .select('organizations(name, logo_url)')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (orgMember?.organizations) {
+        const org = orgMember.organizations as unknown as { name: string; logo_url: string | null };
+        orgName = org.name || orgName;
+        orgLogoUrl = org.logo_url || null;
+      }
+
+      const today = new Date();
+      const expiry = new Date(today);
+      expiry.setDate(expiry.getDate() + 90);
+      const brokerName = brokerData ? [brokerData.first_name, brokerData.last_name].filter(Boolean).join(' ') : 'Broker';
+
+      await generatePreApprovalPdf({
+        orgName,
+        orgLogoUrl,
+        borrowerName: borrower.borrower_name,
+        llcName: (borrower as Record<string, unknown>).llc_name as string || null,
+        preApprovalAmount: pa.prequalified_amount,
+        loanType: pa.loan_type || 'dscr',
+        loanPurpose: 'purchase',
+        occupancy: 'Investment',
+        propertyType: 'SFR',
+        verifiedLiquidity: pa.verified_liquidity || 0,
+        creditScore: borrower.credit_score,
+        expirationDate: expiry.toLocaleDateString(),
+        brokerName,
+        brokerEmail: brokerData?.email || null,
+        brokerPhone: brokerData?.phone || null,
+        issueDate: today.toLocaleDateString(),
+        conditions: [],
+      });
+    } catch (err) {
+      console.error('PDF failed:', err);
+      alert('Failed to generate PDF.');
     }
   };
 
@@ -489,12 +584,79 @@ export function BrokerBorrowerDetailPage() {
       })()}
 
       {activeTab === 'preapprovals' && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold text-gray-900">Pre-Approvals</h2>
-          {preApprovals.length === 0 ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Pre-Approvals</h2>
+            {!showGeneratePA && (
+              <button
+                onClick={() => setShowGeneratePA(true)}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Generate Pre-Approval
+              </button>
+            )}
+          </div>
+
+          {/* Generate form */}
+          {showGeneratePA && (
+            <div className="border border-teal-200 rounded-xl bg-teal-50 p-5 space-y-3">
+              <h3 className="text-sm font-semibold text-teal-800">Generate Pre-Approvals</h3>
+              <p className="text-xs text-teal-700">Enter the verified liquidity amount. Pre-approvals will be generated at: DSCR (4x), Fix & Flip (10x), Bridge (5x).</p>
+              <div>
+                <label className="block text-xs font-medium text-teal-800 mb-1">Verified Liquidity Amount *</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                  <input
+                    type="text"
+                    value={paLiquidity}
+                    onChange={e => {
+                      const num = e.target.value.replace(/\D/g, '');
+                      setPaLiquidity(num ? parseInt(num).toLocaleString() : '');
+                    }}
+                    className="w-full pl-7 pr-4 py-2.5 border border-teal-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 bg-white"
+                    placeholder="200,000"
+                  />
+                </div>
+              </div>
+              {paLiquidity && (
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-white rounded-lg px-3 py-2 border border-teal-100">
+                    <p className="text-gray-500">DSCR (4x)</p>
+                    <p className="font-semibold text-gray-900">${((parseInt(paLiquidity.replace(/\D/g, '')) || 0) * 4).toLocaleString()}</p>
+                  </div>
+                  <div className="bg-white rounded-lg px-3 py-2 border border-teal-100">
+                    <p className="text-gray-500">Fix & Flip (10x)</p>
+                    <p className="font-semibold text-gray-900">${((parseInt(paLiquidity.replace(/\D/g, '')) || 0) * 10).toLocaleString()}</p>
+                  </div>
+                  <div className="bg-white rounded-lg px-3 py-2 border border-teal-100">
+                    <p className="text-gray-500">Bridge (5x)</p>
+                    <p className="font-semibold text-gray-900">${((parseInt(paLiquidity.replace(/\D/g, '')) || 0) * 5).toLocaleString()}</p>
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button onClick={() => { setShowGeneratePA(false); setPaLiquidity(''); }}
+                  className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button onClick={handleGeneratePreApprovals} disabled={generatingPA || !paLiquidity}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
+                  {generatingPA ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Generate
+                </button>
+              </div>
+            </div>
+          )}
+
+          {preApprovals.length === 0 && !showGeneratePA ? (
             <div className="border border-gray-200 rounded-xl bg-white p-8 text-center">
               <DollarSign className="w-10 h-10 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-500">No pre-approvals yet</p>
+              <button
+                onClick={() => setShowGeneratePA(true)}
+                className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100"
+              >
+                <Plus className="w-4 h-4" /> Generate Pre-Approval
+              </button>
             </div>
           ) : (
             preApprovals.map(pa => (
@@ -503,9 +665,19 @@ export function BrokerBorrowerDetailPage() {
                   <p className="font-medium text-gray-900">{LOAN_TYPE_LABELS[pa.loan_type || ''] || pa.loan_type}</p>
                   {pa.verified_liquidity && <p className="text-sm text-gray-500">Verified: ${pa.verified_liquidity.toLocaleString()}</p>}
                 </div>
-                <div className="text-right">
-                  <p className="text-xl font-bold text-teal-700">${pa.prequalified_amount.toLocaleString()}</p>
-                  <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">{pa.status}</span>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className="text-xl font-bold text-teal-700">${pa.prequalified_amount.toLocaleString()}</p>
+                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">{pa.status}</span>
+                  </div>
+                  <button
+                    onClick={() => handleDownloadPreApprovalPdf(pa)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
+                    title="Download Pre-Approval PDF"
+                  >
+                    <Download className="w-4 h-4" />
+                    PDF
+                  </button>
                 </div>
               </div>
             ))
