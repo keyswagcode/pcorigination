@@ -68,6 +68,28 @@ export function BrokerSettingsPage() {
           .eq('organization_id', org.id)
           .eq('is_active', true);
         setTeamMembers(members || []);
+      } else {
+        // Auto-create organization for this broker
+        const brokerName = [userAccount.first_name, userAccount.last_name].filter(Boolean).join(' ');
+        const { data: newOrg } = await supabase
+          .from('organizations')
+          .insert({ name: `${brokerName}'s Organization`, slug: userAccount.pos_slug || undefined })
+          .select('id')
+          .single();
+
+        if (newOrg) {
+          await supabase.from('organization_members').insert({
+            user_id: user.id,
+            organization_id: newOrg.id,
+            role: 'owner',
+            display_name: brokerName,
+            email: userAccount.email,
+            is_active: true,
+            invite_status: 'active',
+          });
+          setOrgId(newOrg.id);
+          setOrgName(`${brokerName}'s Organization`);
+        }
       }
       setIsLoading(false);
     }
@@ -179,12 +201,20 @@ export function BrokerSettingsPage() {
     if (!file || !orgId) return;
     setUploadingLogo(true);
 
+    if (!orgId) {
+      setError('No organization found. Please refresh the page.');
+      setUploadingLogo(false);
+      return;
+    }
+
     const filePath = `${orgId}/logo_${Date.now()}.${file.name.split('.').pop()}`;
     const { error: uploadError } = await supabase.storage
       .from('organization-logos')
       .upload(filePath, file, { upsert: true });
 
-    if (!uploadError) {
+    if (uploadError) {
+      setError(`Logo upload failed: ${uploadError.message}`);
+    } else {
       const { data: urlData } = supabase.storage
         .from('organization-logos')
         .getPublicUrl(filePath);
