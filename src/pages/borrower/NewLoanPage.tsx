@@ -45,6 +45,15 @@ export function NewLoanPage() {
   const [rehabBudget, setRehabBudget] = useState('');
   const [afterRepairValue, setAfterRepairValue] = useState('');
   const [refinanceType, setRefinanceType] = useState<'rate_term' | 'cash_out' | ''>('');
+  const [propertyType, setPropertyType] = useState('');
+
+  const PROPERTY_TYPES = [
+    { value: 'sfh', label: 'SFH' },
+    { value: 'condo', label: 'Condo' },
+    { value: 'townhome', label: 'Townhome' },
+    { value: '2-4_unit', label: '2-4 Unit' },
+    { value: '5-8_unit', label: '5-8 Unit' },
+  ];
 
   const [error, setError] = useState<string | null>(null);
 
@@ -138,6 +147,7 @@ export function NewLoanPage() {
         property_city: propertyCity,
         property_state: propertyState,
         property_zip: propertyZip,
+        property_type: propertyType || null,
         purchase_price: isRefi ? null : propValue,
         estimated_value: propValue,
         loan_amount: loanAmount,
@@ -298,6 +308,21 @@ export function NewLoanPage() {
             </div>
           </div>
 
+          {/* Property Type */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Property Type *</label>
+            <div className="flex flex-wrap gap-2">
+              {PROPERTY_TYPES.map(pt => (
+                <button key={pt.value} type="button" onClick={() => setPropertyType(pt.value)}
+                  className={`px-4 py-2 border-2 rounded-lg text-sm font-medium transition-all ${
+                    propertyType === pt.value ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  {pt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Value */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -396,7 +421,7 @@ export function NewLoanPage() {
 
           <button
             onClick={handleSubmit}
-            disabled={isLoading || !propertyAddress || !propertyValue || !desiredLoanAmount || loanExceedsFixFlipMax || (loanPurpose === 'refinance' && !refinanceType)}
+            disabled={isLoading || !propertyAddress || !propertyValue || !desiredLoanAmount || !propertyType || loanExceedsFixFlipMax || (loanPurpose === 'refinance' && !refinanceType)}
             className="w-full py-3 px-4 bg-teal-600 text-white font-medium rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
           >
             {isLoading ? (

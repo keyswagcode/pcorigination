@@ -46,6 +46,15 @@ export function BorrowerLoanEditPage() {
   const [rehabBudget, setRehabBudget] = useState('');
   const [afterRepairValue, setAfterRepairValue] = useState('');
   const [refinanceType, setRefinanceType] = useState('');
+  const [propertyType, setPropertyType] = useState('');
+
+  const PROPERTY_TYPES = [
+    { value: 'sfh', label: 'SFH' },
+    { value: 'condo', label: 'Condo' },
+    { value: 'townhome', label: 'Townhome' },
+    { value: '2-4_unit', label: '2-4 Unit' },
+    { value: '5-8_unit', label: '5-8 Unit' },
+  ];
 
   useEffect(() => {
     async function loadLoan() {
@@ -73,6 +82,7 @@ export function BorrowerLoanEditPage() {
       setRehabBudget(data.rehab_budget ? data.rehab_budget.toLocaleString() : '');
       setAfterRepairValue(data.after_repair_value ? data.after_repair_value.toLocaleString() : '');
       setRefinanceType(data.refinance_type || '');
+      setPropertyType(data.property_type || '');
       setCanEdit(data.status === 'draft' || data.status === 'submitted');
       setIsLoading(false);
     }
@@ -124,6 +134,7 @@ export function BorrowerLoanEditPage() {
         rehab_budget: isFixFlip && rehabBudget ? parseCurrency(rehabBudget) : null,
         after_repair_value: isFixFlip && afterRepairValue ? parseCurrency(afterRepairValue) : null,
         refinance_type: loanPurpose === 'refinance' ? refinanceType || null : null,
+        property_type: propertyType || null,
       }).eq('id', loanId);
 
       if (updateError) throw updateError;
@@ -232,6 +243,21 @@ export function BorrowerLoanEditPage() {
             </select>
             <input type="text" value={propertyZip} onChange={e => setPropertyZip(e.target.value.replace(/\D/g, '').slice(0, 5))} disabled={!canEdit}
               className="col-span-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm disabled:bg-gray-50 disabled:text-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="Zip" />
+          </div>
+        </div>
+
+        {/* Property Type */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Property Type</label>
+          <div className="flex flex-wrap gap-2">
+            {PROPERTY_TYPES.map(pt => (
+              <button key={pt.value} type="button" onClick={() => canEdit && setPropertyType(pt.value)} disabled={!canEdit}
+                className={`px-4 py-2 border-2 rounded-lg text-sm font-medium transition-all ${
+                  propertyType === pt.value ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-200 text-gray-600'
+                } ${!canEdit ? 'opacity-60' : 'hover:border-gray-300'}`}>
+                {pt.label}
+              </button>
+            ))}
           </div>
         </div>
 
