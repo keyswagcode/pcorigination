@@ -183,6 +183,18 @@ export function BrokerBorrowerDetailPage() {
     }
   };
 
+  const handleDeleteDoc = async (doc: UploadedDoc) => {
+    if (!confirm(`Delete "${doc.file_name}"?`)) return;
+    try {
+      await supabase.storage.from('borrower-documents').remove([doc.file_path]);
+      await supabase.from('uploaded_documents').delete().eq('id', doc.id);
+      await loadData();
+    } catch (err) {
+      console.error('Delete failed:', err);
+      alert('Failed to delete document.');
+    }
+  };
+
   const handleDownloadDoc = async (doc: UploadedDoc) => {
     try {
       const { data, error } = await supabase.storage
@@ -360,6 +372,13 @@ export function BrokerBorrowerDetailPage() {
                     >
                       <Download className="w-3.5 h-3.5" />
                       Download
+                    </button>
+                    <button
+                      onClick={() => handleDeleteDoc(doc)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Delete document"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
