@@ -36,6 +36,7 @@ export function BorrowerApplyPage() {
   const [addressCity, setAddressCity] = useState('');
   const [addressState, setAddressState] = useState('');
   const [addressZip, setAddressZip] = useState('');
+  const [creditConsent, setCreditConsent] = useState(false);
 
   // Track created user for profile step
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
@@ -160,6 +161,8 @@ export function BorrowerApplyPage() {
         address_zip: addressZip,
         state_of_residence: addressState,
         broker_id: resolvedBrokerId,
+        credit_consent: creditConsent,
+        credit_consent_at: creditConsent ? new Date().toISOString() : null,
         borrower_status: 'draft',
         lifecycle_stage: 'profile_created',
       });
@@ -182,7 +185,7 @@ export function BorrowerApplyPage() {
     }
   };
 
-  const profileComplete = firstName && lastName && phone && dateOfBirth && ssn.replace(/\D/g, '').length === 9 && creditScore && addressStreet && addressCity && addressState && addressZip;
+  const profileComplete = firstName && lastName && phone && dateOfBirth && ssn.replace(/\D/g, '').length === 9 && creditScore && addressStreet && addressCity && addressState && addressZip && creditConsent;
 
   if (brokerValid === null) {
     return (
@@ -498,6 +501,21 @@ export function BorrowerApplyPage() {
                       required
                     />
                   </div>
+                </div>
+
+                {/* Credit Consent */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={creditConsent}
+                      onChange={e => setCreditConsent(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500"
+                    />
+                    <span className="text-xs text-gray-600 leading-relaxed">
+                      I authorize Key Real Estate Capital and its affiliates to obtain my credit report from one or more consumer reporting agencies for the purpose of evaluating my eligibility for a mortgage loan. I understand this will be a <strong>soft credit inquiry</strong> that will not affect my credit score. I consent to the collection and use of my personal information, including my Social Security Number, for credit evaluation purposes.
+                    </span>
+                  </label>
                 </div>
 
                 {error && (
