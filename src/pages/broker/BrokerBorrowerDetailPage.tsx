@@ -96,6 +96,8 @@ export function BrokerBorrowerDetailPage() {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Borrower>>({});
   const [uploading, setUploading] = useState(false);
+  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
+  const [uploadingCategory, setUploadingCategory] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!borrowerId) return;
@@ -180,6 +182,31 @@ export function BrokerBorrowerDetailPage() {
     } catch (err) {
       console.error('View failed:', err);
       alert('Failed to open document. Please try downloading instead.');
+    }
+  };
+
+  const handleCategoryUpload = async (category: string, file: File) => {
+    if (!borrower) return;
+    setUploadingCategory(category);
+    try {
+      const filePath = `${borrower.id}/${category}/${Date.now()}_${file.name}`;
+      await supabase.storage.from('borrower-documents').upload(filePath, file);
+      await supabase.from('uploaded_documents').insert({
+        borrower_id: borrower.id,
+        document_type: category,
+        document_subtype: category,
+        file_name: file.name,
+        file_path: filePath,
+        mime_type: file.type,
+        file_size: file.size,
+        processing_status: 'uploaded',
+      });
+      await loadData();
+    } catch (err) {
+      console.error('Upload failed:', err);
+      alert('Failed to upload document.');
+    } finally {
+      setUploadingCategory(null);
     }
   };
 
@@ -403,17 +430,57 @@ export function BrokerBorrowerDetailPage() {
             </div>
           )}
 
-          {/* Missing Documents */}
+          {/* Missing Documents - drag & drop or click to upload */}
           {missingDocs.length > 0 && (
             <div className="border border-amber-200 rounded-xl bg-amber-50 p-5">
-              <h3 className="text-sm font-semibold text-amber-800 mb-3">Not Yet Uploaded ({missingDocs.length})</h3>
+              <h3 className="text-sm font-semibold text-amber-800 mb-3">Not Yet Uploaded ({missingDocs.length}) — drag & drop or click to upload</h3>
               <div className="grid grid-cols-2 gap-2">
-                {missingDocs.map(doc => (
-                  <div key={doc.key} className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-amber-100">
-                    <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-                    <span className="text-sm text-gray-700">{doc.label}</span>
-                  </div>
-                ))}
+                {missingDocs.map(cat => {
+                  const isDragging = dragOverCategory === cat.key;
+                  const isUploading = uploadingCategory === cat.key;
+                  return (
+                    <label
+                      key={cat.key}
+                      className={`flex items-center gap-2 px-3 py-3 rounded-lg border-2 border-dashed cursor-pointer transition-all ${
+                        isDragging
+                          ? 'border-teal-500 bg-teal-50'
+                          : isUploading
+                            ? 'border-gray-300 bg-gray-50 opacity-60'
+                            : 'border-amber-200 bg-white hover:border-teal-400 hover:bg-teal-50/50'
+                      }`}
+                      onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOverCategory(cat.key); }}
+                      onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setDragOverCategory(cat.key); }}
+                      onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setDragOverCategory(null); }}
+                      onDrop={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDragOverCategory(null);
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) handleCategoryUpload(cat.key, file);
+                      }}
+                    >
+                      <input
+                        type="file"
+                        className="hidden"
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          if (file) handleCategoryUpload(cat.key, file);
+                          e.target.value = '';
+                        }}
+                      />
+                      {isUploading ? (
+                        <Loader2 className="w-4 h-4 text-teal-600 animate-spin flex-shrink-0" />
+                      ) : isDragging ? (
+                        <Download className="w-4 h-4 text-teal-600 flex-shrink-0" />
+                      ) : (
+                        <Upload className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                      )}
+                      <span className={`text-sm ${isDragging ? 'text-teal-700 font-medium' : 'text-gray-700'}`}>
+                        {isDragging ? 'Drop here' : isUploading ? 'Uploading...' : cat.label}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
           )}
