@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   Link2, Copy, Check, Save, Upload, Image, Loader2, AlertCircle, CheckCircle2,
-  UserPlus, Users, Trash2, Shield, Star
+  UserPlus, Users, Trash2, Shield, Star, Pencil, X
 } from 'lucide-react';
 import { inviteTeamMember } from '../../services/teamInviteService';
 
@@ -146,6 +146,34 @@ export function BrokerSettingsPage() {
 
   const handleToggleNotify = async (memberId: string, current: boolean) => {
     await supabase.from('organization_members').update({ notify_new_apps: !current }).eq('id', memberId);
+    await loadTeamMembers();
+  };
+
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [editMemberName, setEditMemberName] = useState('');
+  const [editMemberEmail, setEditMemberEmail] = useState('');
+  const [editMemberRole, setEditMemberRole] = useState('');
+
+  const startEditMember = (member: TeamMember) => {
+    setEditingMemberId(member.id);
+    setEditMemberName(member.display_name || '');
+    setEditMemberEmail(member.email || '');
+    setEditMemberRole(member.role || 'ae');
+  };
+
+  const handleSaveMember = async (memberId: string, userId: string) => {
+    await supabase.from('organization_members').update({
+      display_name: editMemberName,
+      email: editMemberEmail,
+      role: editMemberRole,
+    }).eq('id', memberId);
+    await supabase.from('user_accounts').update({
+      first_name: editMemberName.split(' ')[0] || '',
+      last_name: editMemberName.split(' ').slice(1).join(' ') || '',
+      email: editMemberEmail,
+      broker_role: editMemberRole,
+    }).eq('id', userId);
+    setEditingMemberId(null);
     await loadTeamMembers();
   };
 
@@ -501,60 +529,87 @@ export function BrokerSettingsPage() {
         {teamMembers.filter(m => m.invite_status !== 'pending').length > 0 ? (
           <div className="divide-y divide-gray-100">
             {teamMembers.filter(m => m.invite_status !== 'pending').map(member => (
-              <div key={member.id} className="py-3 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center">
-                    <Shield className="w-4 h-4 text-gray-500" />
+              editingMemberId === member.id ? (
+                <div key={member.id} className="py-3 px-3 bg-gray-50 rounded-lg space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-gray-500 uppercase">Edit Member</p>
+                    <button onClick={() => setEditingMemberId(null)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Name</label>
+                      <input type="text" value={editMemberName} onChange={e => setEditMemberName(e.target.value)}
+                        className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Email</label>
+                      <input type="email" value={editMemberEmail} onChange={e => setEditMemberEmail(e.target.value)}
+                        className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" />
+                    </div>
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-gray-900">{member.display_name || member.email}</p>
-                      {member.invite_status === 'pending' && (
-                        <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-700">Pending</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {member.email && <span className="text-xs text-gray-500">{member.email}</span>}
-                      {member.role === 'owner' ? (
-                        <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-700">OWNER</span>
-                      ) : (
-                        <select
-                          value={member.role || 'ae'}
-                          onChange={e => handleChangeRole(member.id, member.user_id, e.target.value)}
-                          className={`px-1.5 py-0.5 text-xs font-medium rounded border-0 cursor-pointer ${
-                            member.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                            member.role === 'vp' ? 'bg-blue-100 text-blue-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}
-                        >
-                          <option value="admin">ADMIN</option>
-                          <option value="vp">VP</option>
-                          <option value="ae">AE</option>
-                        </select>
-                      )}
+                    <label className="block text-xs text-gray-500 mb-1">Role</label>
+                    <div className="flex gap-2">
+                      {[['admin', 'Admin'], ['vp', 'VP'], ['ae', 'AE']].map(([val, label]) => (
+                        <button key={val} type="button" onClick={() => setEditMemberRole(val)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${editMemberRole === val ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-200 bg-white text-gray-600'}`}>
+                          {label}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handleToggleNotify(member.id, member.notify_new_apps)}
-                    className={`p-1.5 rounded-lg transition-colors ${
-                      member.notify_new_apps
-                        ? 'text-amber-500 hover:text-amber-600'
-                        : 'text-gray-300 hover:text-gray-400'
-                    }`}
-                    title={member.notify_new_apps ? 'Starred — receives new app alerts. Click to unstar.' : 'Not starred — click to receive new app alerts'}
-                  >
-                    <Star className={`w-4 h-4 ${member.notify_new_apps ? 'fill-amber-400' : ''}`} />
-                  </button>
-                  {member.user_id !== user?.id && (
-                    <button onClick={() => handleRemoveMember(member.id)}
-                      className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="Remove member">
-                      <Trash2 className="w-4 h-4" />
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditingMemberId(null)} className="px-3 py-1.5 text-xs text-gray-600 bg-white border border-gray-200 rounded-lg">Cancel</button>
+                    <button onClick={() => handleSaveMember(member.id, member.user_id)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700">
+                      <Save className="w-3 h-3" /> Save
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div key={member.id} className="py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center">
+                      <Shield className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{member.display_name || member.email}</p>
+                      <div className="flex items-center gap-2">
+                        {member.email && <span className="text-xs text-gray-500">{member.email}</span>}
+                        <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
+                          member.role === 'owner' ? 'bg-amber-100 text-amber-700' :
+                          member.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                          member.role === 'vp' ? 'bg-blue-100 text-blue-700' :
+                          'bg-gray-100 text-gray-600'
+                        }`}>{(member.role || 'ae').toUpperCase()}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleToggleNotify(member.id, member.notify_new_apps)}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        member.notify_new_apps ? 'text-amber-500 hover:text-amber-600' : 'text-gray-300 hover:text-gray-400'
+                      }`}
+                      title={member.notify_new_apps ? 'Starred — receives new app alerts' : 'Click to star'}
+                    >
+                      <Star className={`w-4 h-4 ${member.notify_new_apps ? 'fill-amber-400' : ''}`} />
+                    </button>
+                    {member.user_id !== user?.id && (
+                      <>
+                        <button onClick={() => startEditMember(member)}
+                          className="p-1.5 text-gray-400 hover:text-teal-600 transition-colors" title="Edit member">
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleRemoveMember(member.id)}
+                          className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="Remove member">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
             ))}
           </div>
         ) : (
