@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, Search, Loader2, ArrowRight } from 'lucide-react';
+import { Users, Search, Loader2, ArrowRight, Plus, Upload, X, Download, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface BorrowerRow {
   id: string;
@@ -39,19 +39,121 @@ export function BrokerBorrowersPage() {
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
 
-  useEffect(() => {
-    async function loadData() {
-      if (!user) return;
-      const { data } = await supabase
-        .from('borrowers')
-        .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at, updated_at')
-        .eq('broker_id', user.id)
-        .order('created_at', { ascending: false });
-      setBorrowers(data || []);
-      setIsLoading(false);
+  // Manual add
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [addEmail, setAddEmail] = useState('');
+  const [addPhone, setAddPhone] = useState('');
+  const [addCreditScore, setAddCreditScore] = useState('');
+  const [addEntityType, setAddEntityType] = useState('individual');
+  const [adding, setAdding] = useState(false);
+
+  // CSV upload
+  const [showCsvUpload, setShowCsvUpload] = useState(false);
+  const [csvUploading, setCsvUploading] = useState(false);
+  const [csvResult, setCsvResult] = useState<{ success: number; failed: number } | null>(null);
+  const [csvError, setCsvError] = useState<string | null>(null);
+
+  async function loadData() {
+    if (!user) return;
+    const { data } = await supabase
+      .from('borrowers')
+      .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at, updated_at')
+      .eq('broker_id', user.id)
+      .order('created_at', { ascending: false });
+    setBorrowers(data || []);
+    setIsLoading(false);
+  }
+
+  useEffect(() => { loadData(); }, [user]);
+
+  const handleAddBorrower = async () => {
+    if (!user || !addName) return;
+    setAdding(true);
+    try {
+      const { error } = await supabase.from('borrowers').insert({
+        broker_id: user.id,
+        borrower_name: addName,
+        email: addEmail || null,
+        phone: addPhone.replace(/\D/g, '') || null,
+        credit_score: addCreditScore ? parseInt(addCreditScore) : null,
+        entity_type: addEntityType,
+        borrower_status: 'draft',
+        lifecycle_stage: 'profile_created',
+      });
+      if (error) throw error;
+      setAddName(''); setAddEmail(''); setAddPhone(''); setAddCreditScore('');
+      setAddEntityType('individual');
+      setShowAddForm(false);
+      await loadData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to add borrower');
+    } finally {
+      setAdding(false);
     }
-    loadData();
-  }, [user]);
+  };
+
+  const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    setCsvUploading(true);
+    setCsvResult(null);
+    setCsvError(null);
+
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+      if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
+
+      const header = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, ''));
+      const nameIdx = header.findIndex(h => h.includes('name'));
+      const emailIdx = header.findIndex(h => h.includes('email'));
+      const phoneIdx = header.findIndex(h => h.includes('phone'));
+      const creditIdx = header.findIndex(h => h.includes('credit'));
+      const entityIdx = header.findIndex(h => h.includes('entity') || h.includes('type'));
+
+      if (nameIdx === -1) throw new Error('CSV must have a "name" column');
+
+      let success = 0;
+      let failed = 0;
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
+        const name = cols[nameIdx];
+        if (!name) { failed++; continue; }
+
+        const { error } = await supabase.from('borrowers').insert({
+          broker_id: user.id,
+          borrower_name: name,
+          email: emailIdx >= 0 ? cols[emailIdx] || null : null,
+          phone: phoneIdx >= 0 ? (cols[phoneIdx] || '').replace(/\D/g, '') || null : null,
+          credit_score: creditIdx >= 0 && cols[creditIdx] ? parseInt(cols[creditIdx]) || null : null,
+          entity_type: entityIdx >= 0 ? cols[entityIdx] || 'individual' : 'individual',
+          borrower_status: 'draft',
+          lifecycle_stage: 'profile_created',
+        });
+
+        if (error) { failed++; } else { success++; }
+      }
+
+      setCsvResult({ success, failed });
+      await loadData();
+    } catch (err) {
+      setCsvError(err instanceof Error ? err.message : 'CSV upload failed');
+    } finally {
+      setCsvUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const downloadCsvTemplate = () => {
+    const csv = 'Name,Email,Phone,Credit Score,Entity Type\nJohn Doe,john@email.com,(555) 123-4567,720,individual\nSmith LLC,contact@smith.com,(555) 987-6543,750,llc\n';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'borrowers-template.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const filtered = borrowers.filter(b => {
     if (search) {
@@ -68,10 +170,114 @@ export function BrokerBorrowersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">My Borrowers</h1>
-        <p className="text-gray-500 mt-1">{borrowers.length} total borrowers</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">My Borrowers</h1>
+          <p className="text-gray-500 mt-1">{borrowers.length} total borrowers</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setShowCsvUpload(!showCsvUpload); setShowAddForm(false); }}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            CSV Upload
+          </button>
+          <button
+            onClick={() => { setShowAddForm(!showAddForm); setShowCsvUpload(false); }}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Borrower
+          </button>
+        </div>
       </div>
+
+      {/* Add Borrower Form */}
+      {showAddForm && (
+        <div className="border border-teal-200 rounded-xl bg-teal-50 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-teal-800">Add New Borrower</h3>
+            <button onClick={() => setShowAddForm(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Full Name *</label>
+              <input type="text" value={addName} onChange={e => setAddName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="John Doe" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+              <input type="email" value={addEmail} onChange={e => setAddEmail(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="john@email.com" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+              <input type="tel" value={addPhone} onChange={e => setAddPhone(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="(555) 123-4567" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Credit Score</label>
+              <input type="number" value={addCreditScore} onChange={e => setAddCreditScore(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="720" min={300} max={850} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Entity Type</label>
+            <div className="flex gap-2">
+              {[['individual', 'Individual'], ['llc', 'LLC'], ['corporation', 'Corporation']].map(([val, label]) => (
+                <button key={val} type="button" onClick={() => setAddEntityType(val)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${addEntityType === val ? 'border-teal-500 bg-teal-100 text-teal-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={() => setShowAddForm(false)} className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button onClick={handleAddBorrower} disabled={adding || !addName}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
+              {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Add Borrower
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Upload */}
+      {showCsvUpload && (
+        <div className="border border-gray-200 rounded-xl bg-white p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">Bulk Upload via CSV</h3>
+            <button onClick={() => { setShowCsvUpload(false); setCsvResult(null); setCsvError(null); }} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+          </div>
+          <p className="text-xs text-gray-500">Upload a CSV file with columns: Name, Email, Phone, Credit Score, Entity Type</p>
+          <div className="flex gap-2">
+            <button onClick={downloadCsvTemplate}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors">
+              <Download className="w-3.5 h-3.5" /> Download Template
+            </button>
+            <label className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors border-2 border-dashed ${
+              csvUploading ? 'border-gray-300 bg-gray-50 text-gray-400' : 'border-teal-300 text-teal-700 hover:bg-teal-50 hover:border-teal-400'
+            }`}>
+              <input type="file" accept=".csv" onChange={handleCsvUpload} className="hidden" disabled={csvUploading} />
+              {csvUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {csvUploading ? 'Uploading...' : 'Choose CSV File'}
+            </label>
+          </div>
+          {csvResult && (
+            <div className="px-4 py-3 bg-green-50 border border-green-100 rounded-lg text-sm text-green-700 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Imported {csvResult.success} borrower(s){csvResult.failed > 0 ? `, ${csvResult.failed} failed` : ''}.
+            </div>
+          )}
+          {csvError && (
+            <div className="px-4 py-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" /> {csvError}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex gap-3">
