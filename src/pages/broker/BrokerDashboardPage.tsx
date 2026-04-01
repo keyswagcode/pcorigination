@@ -6,6 +6,7 @@ import {
   Users, FileText, CheckCircle2, Clock, AlertCircle,
   DollarSign, Loader2, Copy, Check, ArrowRight, Search
 } from 'lucide-react';
+import { logAudit } from '../../services/auditService';
 
 interface BorrowerSummary {
   id: string;
@@ -110,9 +111,20 @@ export function BrokerDashboardPage() {
     ));
 
     // Save to DB
+    const oldStage = borrowers.find(b => b.id === borrowerId)?.lifecycle_stage || 'profile_created';
     await supabase.from('borrowers')
       .update({ lifecycle_stage: newStage })
       .eq('id', borrowerId);
+
+    // Audit trail
+    if (user) {
+      const oldLabel = PIPELINE_STAGES.find(s => s.key === oldStage)?.label || oldStage;
+      const newLabel = PIPELINE_STAGES.find(s => s.key === newStage)?.label || newStage;
+      logAudit({
+        borrowerId, userId: user.id, action: 'updated', entityType: 'borrower',
+        entityId: borrowerId, fieldName: 'pipeline_stage', oldValue: oldLabel, newValue: newLabel,
+      });
+    }
 
     // Log activity
     const borrower = borrowers.find(b => b.id === borrowerId);

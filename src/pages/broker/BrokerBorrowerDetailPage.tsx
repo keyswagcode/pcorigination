@@ -8,6 +8,8 @@ import {
   Edit3, Save, X, Plus, Mail, Phone, ExternalLink
 } from 'lucide-react';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
+import { logAudit, getAuditTrail } from '../../services/auditService';
+import type { AuditEntry } from '../../services/auditService';
 
 interface Borrower {
   id: string;
@@ -73,7 +75,7 @@ interface ActivityEntry {
   created_at: string;
 }
 
-type Tab = 'profile' | 'documents' | 'preapprovals' | 'loans' | 'notes';
+type Tab = 'profile' | 'documents' | 'preapprovals' | 'loans' | 'notes' | 'audit';
 
 const LOAN_TYPE_LABELS: Record<string, string> = { dscr: 'DSCR', fix_flip: 'Fix & Flip', bridge: 'Bridge' };
 const STATUS_COLORS: Record<string, string> = {
@@ -91,6 +93,7 @@ export function BrokerBorrowerDetailPage() {
   const [loans, setLoans] = useState<LoanScenario[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [auditTrail, setAuditTrail] = useState<AuditEntry[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('profile');
   const [isLoading, setIsLoading] = useState(true);
   const [newNote, setNewNote] = useState('');
@@ -128,6 +131,10 @@ export function BrokerBorrowerDetailPage() {
     }));
     setActivity(aRes.data || []);
 
+    // Load audit trail
+    const auditData = await getAuditTrail(borrowerId);
+    setAuditTrail(auditData);
+
     // Load team members for @ mentions
     if (user) {
       const { data: orgMember } = await supabase
@@ -155,7 +162,23 @@ export function BrokerBorrowerDetailPage() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const handleSaveEdit = async () => {
-    if (!borrower) return;
+    if (!borrower || !user) return;
+    // Log each changed field
+    for (const [key, newVal] of Object.entries(editData)) {
+      const oldVal = borrower[key as keyof Borrower];
+      if (String(newVal) !== String(oldVal)) {
+        await logAudit({
+          borrowerId: borrower.id,
+          userId: user.id,
+          action: 'updated',
+          entityType: 'borrower',
+          entityId: borrower.id,
+          fieldName: key,
+          oldValue: String(oldVal ?? ''),
+          newValue: String(newVal ?? ''),
+        });
+      }
+    }
     await supabase.from('borrowers').update(editData).eq('id', borrower.id);
     setEditing(false);
     await loadData();
@@ -253,6 +276,9 @@ export function BrokerBorrowerDetailPage() {
       file_size: file.size,
       processing_status: 'uploaded',
     });
+    if (borrower && user) {
+      await logAudit({ borrowerId: borrower.id, userId: user.id, action: 'uploaded', entityType: 'document', fieldName: 'file', newValue: file.name });
+    }
     setUploading(false);
     e.target.value = '';
     await loadData();
@@ -399,6 +425,9 @@ export function BrokerBorrowerDetailPage() {
     try {
       await supabase.storage.from('borrower-documents').remove([doc.file_path]);
       await supabase.from('uploaded_documents').delete().eq('id', doc.id);
+      if (borrower && user) {
+        await logAudit({ borrowerId: borrower.id, userId: user.id, action: 'deleted', entityType: 'document', entityId: doc.id, fieldName: 'file', oldValue: doc.file_name, newValue: '' });
+      }
       await loadData();
     } catch (err) {
       console.error('Delete failed:', err);
@@ -442,6 +471,7 @@ export function BrokerBorrowerDetailPage() {
     { key: 'preapprovals', label: 'Pre-Approvals', icon: DollarSign, count: preApprovals.length },
     { key: 'loans', label: 'Loans', icon: Briefcase, count: loans.length },
     { key: 'notes', label: 'Notes & Activity', icon: MessageSquare, count: notes.length },
+    { key: 'audit', label: 'Audit Trail', icon: FileText, count: auditTrail.length },
   ];
 
   return (
@@ -952,6 +982,58 @@ export function BrokerBorrowerDetailPage() {
               {activity.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No activity recorded</p>}
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'audit' && (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Audit Trail</h2>
+          {auditTrail.length === 0 ? (
+            <div className="border border-gray-200 rounded-xl bg-white p-8 text-center">
+              <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No audit history yet</p>
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-xl bg-white divide-y divide-gray-100">
+              {auditTrail.map(entry => (
+                <div key={entry.id} className="px-5 py-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        entry.action === 'created' ? 'bg-green-400' :
+                        entry.action === 'updated' ? 'bg-blue-400' :
+                        entry.action === 'deleted' ? 'bg-red-400' :
+                        entry.action === 'uploaded' ? 'bg-teal-400' :
+                        'bg-gray-400'
+                      }`} />
+                      <span className="text-sm text-gray-900">
+                        <span className="font-medium">{entry.user_name || 'System'}</span>
+                        {' '}
+                        <span className="text-gray-500">{entry.action}</span>
+                        {' '}
+                        <span className="text-gray-700">{entry.entity_type}</span>
+                        {entry.field_name && (
+                          <span className="text-gray-500"> &middot; {entry.field_name.replace(/_/g, ' ')}</span>
+                        )}
+                      </span>
+                    </div>
+                    <span className="text-xs text-gray-400 flex-shrink-0">{new Date(entry.created_at).toLocaleString()}</span>
+                  </div>
+                  {(entry.old_value || entry.new_value) && (
+                    <div className="mt-1 ml-4 flex items-center gap-2 text-xs">
+                      {entry.old_value && (
+                        <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded line-through">{entry.old_value.slice(0, 50)}</span>
+                      )}
+                      {entry.old_value && entry.new_value && <span className="text-gray-400">→</span>}
+                      {entry.new_value && (
+                        <span className="px-2 py-0.5 bg-green-50 text-green-700 rounded">{entry.new_value.slice(0, 50)}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

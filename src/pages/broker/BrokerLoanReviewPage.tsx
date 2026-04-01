@@ -6,6 +6,7 @@ import {
   ArrowLeft, CheckCircle2, XCircle, DollarSign, MapPin,
   User, Loader2, Building2
 } from 'lucide-react';
+import { logAudit } from '../../services/auditService';
 
 interface LoanDetail {
   id: string;
@@ -96,6 +97,7 @@ export function BrokerLoanReviewPage() {
 
     // Update loan status
     await supabase.from('loan_scenarios').update({ status: 'approved' }).eq('id', loan.id);
+    await logAudit({ borrowerId: loan.borrower_id, loanScenarioId: loan.id, userId: user.id, action: 'approved', entityType: 'loan', entityId: loan.id, fieldName: 'status', oldValue: 'submitted', newValue: 'approved' });
 
     // Create task checklist based on loan type
     const tasks = (loan.loan_type === 'fix_flip' || loan.loan_type === 'bridge') ? FIX_FLIP_TASKS : DSCR_TASKS;
@@ -148,6 +150,7 @@ export function BrokerLoanReviewPage() {
     setProcessing(true);
 
     await supabase.from('loan_scenarios').update({ status: 'declined' }).eq('id', loan.id);
+    await logAudit({ borrowerId: loan.borrower_id, loanScenarioId: loan.id, userId: user.id, action: 'declined', entityType: 'loan', entityId: loan.id, fieldName: 'status', oldValue: 'submitted', newValue: 'declined', metadata: { reason: declineNotes } });
 
     await supabase.from('borrower_activity_log').insert({
       borrower_id: loan.borrower_id,
