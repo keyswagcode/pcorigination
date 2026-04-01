@@ -443,9 +443,50 @@ export function BrokerSettingsPage() {
         )}
 
         {/* Team member list */}
-        {teamMembers.length > 0 ? (
+        {/* Pending Invites */}
+        {teamMembers.filter(m => m.invite_status === 'pending').length > 0 && (
+          <div className="mb-4">
+            <h3 className="text-xs font-semibold text-amber-700 uppercase mb-2">Pending Invites ({teamMembers.filter(m => m.invite_status === 'pending').length})</h3>
+            <div className="border border-amber-200 rounded-lg bg-amber-50 divide-y divide-amber-100">
+              {teamMembers.filter(m => m.invite_status === 'pending').map(member => (
+                <div key={member.id} className="px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-amber-100 rounded-full flex items-center justify-center">
+                      <span className="text-xs font-medium text-amber-700">
+                        {(member.display_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{member.display_name || member.email}</p>
+                      <div className="flex items-center gap-2">
+                        {member.email && <span className="text-xs text-gray-500">{member.email}</span>}
+                        <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
+                          member.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                          member.role === 'vp' ? 'bg-blue-100 text-blue-700' :
+                          'bg-gray-100 text-gray-600'
+                        }`}>{(member.role || 'ae').toUpperCase()}</span>
+                        <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-700">Pending</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => handleRemoveMember(member.id)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="Cancel invite">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Active Members */}
+        {teamMembers.filter(m => m.invite_status !== 'pending').length > 0 && (
+          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Active Members</h3>
+        )}
+
+        {teamMembers.filter(m => m.invite_status !== 'pending').length > 0 ? (
           <div className="divide-y divide-gray-100">
-            {teamMembers.map(member => (
+            {teamMembers.filter(m => m.invite_status !== 'pending').map(member => (
               <div key={member.id} className="py-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center">
