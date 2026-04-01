@@ -660,18 +660,39 @@ export function BrokerBorrowerDetailPage() {
             </div>
           ) : (
             preApprovals.map(pa => (
-              <div key={pa.id} className="border border-gray-200 rounded-xl bg-white px-5 py-4 flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-gray-900">{LOAN_TYPE_LABELS[pa.loan_type || ''] || pa.loan_type}</p>
-                  {pa.verified_liquidity && <p className="text-sm text-gray-500">Verified: ${pa.verified_liquidity.toLocaleString()}</p>}
+              <div key={pa.id} className="border border-gray-200 rounded-xl bg-white px-5 py-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="font-medium text-gray-900">{LOAN_TYPE_LABELS[pa.loan_type || ''] || pa.loan_type}</p>
+                    {pa.verified_liquidity && <p className="text-sm text-gray-500">Verified liquidity: ${pa.verified_liquidity.toLocaleString()} &middot; Max: ${pa.prequalified_amount.toLocaleString()}</p>}
+                  </div>
+                  <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">{pa.status}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <p className="text-xl font-bold text-teal-700">${pa.prequalified_amount.toLocaleString()}</p>
-                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">{pa.status}</span>
+                  <div className="flex-1">
+                    <label className="block text-xs text-gray-500 mb-1">Pre-Approval Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                      <input
+                        type="text"
+                        defaultValue={pa.prequalified_amount.toLocaleString()}
+                        onBlur={async (e) => {
+                          const val = parseInt(e.target.value.replace(/\D/g, '')) || 0;
+                          if (val > 0 && val !== pa.prequalified_amount) {
+                            await supabase.from('pre_approvals').update({ prequalified_amount: val }).eq('id', pa.id);
+                            await loadData();
+                          }
+                        }}
+                        onChange={(e) => {
+                          const num = e.target.value.replace(/\D/g, '');
+                          e.target.value = num ? parseInt(num).toLocaleString() : '';
+                        }}
+                        className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
+                      />
+                    </div>
                   </div>
                   <button
-                    onClick={() => handleDownloadPreApprovalPdf(pa)}
+                    onClick={() => handleDownloadPreApprovalPdf({ ...pa, prequalified_amount: pa.prequalified_amount })}
                     className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
                     title="Download Pre-Approval PDF"
                   >
