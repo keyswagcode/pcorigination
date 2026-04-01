@@ -357,9 +357,9 @@ export function BrokerBorrowersPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.map(b => (
-                <tr key={b.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={b.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => window.location.href = `/internal/my-borrowers/${b.id}`}>
                   <td className="px-5 py-4">
-                    <p className="text-sm font-medium text-gray-900">{b.borrower_name}</p>
+                    <Link to={`/internal/my-borrowers/${b.id}`} className="text-sm font-medium text-teal-700 hover:text-teal-900 hover:underline">{b.borrower_name}</Link>
                     <p className="text-xs text-gray-500">{b.email}</p>
                   </td>
                   <td className="px-5 py-4">
