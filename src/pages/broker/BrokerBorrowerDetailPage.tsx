@@ -323,17 +323,17 @@ export function BrokerBorrowerDetailPage() {
 
       {activeTab === 'documents' && (() => {
         const allCategories = [
-          { key: 'drivers_license', label: "Driver's License / Passport", always: true },
-          { key: 'voided_check', label: 'Voided Check', always: true },
-          { key: 'property_insurance', label: 'Property Insurance', always: true },
-          { key: 'appraisal', label: 'Appraisal', always: true },
-          { key: 'lease', label: 'Lease', always: false, condition: borrower.entity_type !== 'individual' || documents.some(d => d.document_type === 'lease') },
-          { key: 'articles_of_incorporation', label: 'Articles of Incorporation', always: false, condition: borrower.entity_type !== 'individual' },
-          { key: 'ein_letter', label: 'EIN Letter', always: false, condition: borrower.entity_type !== 'individual' },
-          { key: 'operating_agreement', label: 'Operating Agreement', always: false, condition: borrower.entity_type !== 'individual' },
-          { key: 'rehab_budget', label: 'Rehab Budget', always: false, condition: loans.some(l => l.loan_type === 'fix_flip' || l.loan_type === 'bridge') },
-          { key: 'flip_experience', label: 'Flip Experience Sheet', always: false, condition: loans.some(l => l.loan_type === 'fix_flip' || l.loan_type === 'bridge') },
-        ].filter(c => c.always || c.condition);
+          { key: 'drivers_license', label: "Driver's License / Passport" },
+          { key: 'voided_check', label: 'Voided Check' },
+          { key: 'property_insurance', label: 'Property Insurance' },
+          { key: 'appraisal', label: 'Appraisal' },
+          { key: 'lease', label: 'Lease' },
+          { key: 'articles_of_incorporation', label: 'Articles of Incorporation' },
+          { key: 'ein_letter', label: 'EIN Letter' },
+          { key: 'operating_agreement', label: 'Operating Agreement' },
+          { key: 'rehab_budget', label: 'Rehab Budget' },
+          { key: 'flip_experience', label: 'Flip Experience Sheet' },
+        ];
 
         const uploadedTypes = new Set(documents.map(d => d.document_type));
         const missingDocs = allCategories.filter(c => !uploadedTypes.has(c.key));
