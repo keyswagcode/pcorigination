@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import {
   Building2, Plus, MapPin, DollarSign, Clock,
-  CheckCircle2, XCircle, Loader2, AlertCircle, ArrowRight
+  CheckCircle2, XCircle, Loader2, ArrowRight
 } from 'lucide-react';
 
 interface LoanScenario {
@@ -41,7 +41,7 @@ export function BorrowerLoansPage() {
   const { user } = useAuth();
   const [loans, setLoans] = useState<LoanScenario[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [borrowerId, setBorrowerId] = useState<string | null>(null);
+  const [, setBorrowerId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadLoans() {
@@ -110,7 +110,7 @@ export function BorrowerLoansPage() {
             const StatusIcon = config.icon;
 
             return (
-              <div key={loan.id} className="border border-gray-200 rounded-xl bg-white px-5 py-4 hover:border-gray-300 transition-colors">
+              <Link key={loan.id} to={`/application/loans/${loan.id}`} className="block border border-gray-200 rounded-xl bg-white px-5 py-4 hover:border-teal-300 hover:bg-teal-50/30 transition-colors cursor-pointer">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4 min-w-0">
                     <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
@@ -153,7 +153,7 @@ export function BorrowerLoansPage() {
                     </span>
                   </div>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>

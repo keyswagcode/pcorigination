@@ -7,13 +7,14 @@ import { BorrowerLayout } from './layouts/BorrowerLayout';
 import { InternalLayout } from './layouts/InternalLayout';
 import { BorrowerHomePage } from './pages/borrower/BorrowerHomePage';
 import { NewLoanPage } from './pages/borrower/NewLoanPage';
-import { InternalDashboardPage } from './pages/internal/InternalDashboardPage';
 import { BorrowerQueuePage } from './pages/internal/BorrowerQueuePage';
 import { BorrowerFilePage } from './pages/internal/BorrowerFilePage';
 import { InternalPlacerBotPage } from './pages/internal/InternalPlacerBotPage';
 import { BorrowerApplyPage } from './pages/BorrowerApplyPage';
 import { BorrowerDocumentsPage } from './pages/borrower/BorrowerDocumentsPage';
 import { BorrowerLoansPage } from './pages/borrower/BorrowerLoansPage';
+import { BorrowerProfilePage } from './pages/borrower/BorrowerProfilePage';
+import { BorrowerLoanEditPage } from './pages/borrower/BorrowerLoanEditPage';
 import { BrokerDashboardPage } from './pages/broker/BrokerDashboardPage';
 import { BrokerBorrowersPage } from './pages/broker/BrokerBorrowersPage';
 import { BrokerBorrowerDetailPage } from './pages/broker/BrokerBorrowerDetailPage';
@@ -138,8 +139,10 @@ function AppRoutes() {
           }
         >
           <Route index element={<BorrowerHomePage />} />
+          <Route path="profile" element={<BorrowerProfilePage />} />
           <Route path="documents" element={<BorrowerDocumentsPage />} />
           <Route path="loans" element={<BorrowerLoansPage />} />
+          <Route path="loans/:loanId" element={<BorrowerLoanEditPage />} />
           <Route path="new-loan" element={<NewLoanPage />} />
         </Route>
 

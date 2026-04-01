@@ -12,7 +12,7 @@ interface DocCategory {
   description: string;
   icon: typeof FileText;
   accept: string;
-  condition: 'always' | 'entity' | 'fix_flip';
+  condition: 'always' | 'entity' | 'fix_flip' | 'dscr';
 }
 
 const DOC_CATEGORIES: DocCategory[] = [
@@ -20,6 +20,7 @@ const DOC_CATEGORIES: DocCategory[] = [
   { key: 'voided_check', label: 'Voided Check', description: 'For payment verification', icon: Receipt, accept: '.pdf,.jpg,.jpeg,.png', condition: 'always' },
   { key: 'property_insurance', label: 'Property Insurance', description: 'Proof of insurance coverage', icon: Shield, accept: '.pdf', condition: 'always' },
   { key: 'appraisal', label: 'Appraisal', description: 'Property appraisal report', icon: FileText, accept: '.pdf', condition: 'always' },
+  { key: 'lease', label: 'Lease', description: 'Current lease agreement for rental property', icon: FileText, accept: '.pdf', condition: 'dscr' },
   { key: 'articles_of_incorporation', label: 'Articles of Incorporation', description: 'LLC or corporation formation docs', icon: Building2, accept: '.pdf', condition: 'entity' },
   { key: 'ein_letter', label: 'EIN Letter', description: 'IRS Employer Identification Number letter', icon: Building2, accept: '.pdf', condition: 'entity' },
   { key: 'operating_agreement', label: 'Operating Agreement', description: 'LLC operating agreement', icon: Building2, accept: '.pdf', condition: 'entity' },
@@ -44,7 +45,9 @@ export function BorrowerDocumentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
   const [hasFixFlipLoan, setHasFixFlipLoan] = useState(false);
+  const [hasDscrLoan, setHasDscrLoan] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -71,6 +74,15 @@ export function BorrowerDocumentsPage() {
 
     setDocuments(docsResult.data || []);
     setHasFixFlipLoan((loansResult.data?.length || 0) > 0);
+
+    // Check for DSCR loans
+    const { data: dscrLoans } = await supabase
+      .from('loan_scenarios')
+      .select('loan_type')
+      .eq('borrower_id', b.id)
+      .eq('loan_type', 'dscr');
+    setHasDscrLoan((dscrLoans?.length || 0) > 0);
+
     setIsLoading(false);
   }, [user]);
 
@@ -78,11 +90,13 @@ export function BorrowerDocumentsPage() {
 
   const isEntity = borrower?.entity_type && borrower.entity_type !== 'individual';
   const showFixFlip = hasFixFlipLoan || (borrower?.preferred_loan_type && ['fix_flip', 'bridge', 'fix_and_flip'].includes(borrower.preferred_loan_type));
+  const showDscr = hasDscrLoan || (borrower?.preferred_loan_type && borrower.preferred_loan_type === 'dscr');
 
   const visibleCategories = DOC_CATEGORIES.filter(cat => {
     if (cat.condition === 'always') return true;
     if (cat.condition === 'entity') return isEntity;
     if (cat.condition === 'fix_flip') return showFixFlip;
+    if (cat.condition === 'dscr') return showDscr;
     return false;
   });
 
@@ -181,21 +195,42 @@ export function BorrowerDocumentsPage() {
           const isUploading = uploading === cat.key;
           const Icon = cat.icon;
 
+          const isDragging = dragOver === cat.key;
+
           return (
-            <div key={cat.key} className="border border-gray-200 rounded-xl bg-white overflow-hidden">
+            <div
+              key={cat.key}
+              className={`border-2 rounded-xl bg-white overflow-hidden transition-colors ${
+                isDragging
+                  ? 'border-teal-500 bg-teal-50/50'
+                  : 'border-gray-200'
+              }`}
+              onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOver(cat.key); }}
+              onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setDragOver(cat.key); }}
+              onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setDragOver(null); }}
+              onDrop={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOver(null);
+                const file = e.dataTransfer.files?.[0];
+                if (file) handleUpload(cat.key, file);
+              }}
+            >
               <div className="px-5 py-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${catDocs.length > 0 ? 'bg-teal-100' : 'bg-gray-100'}`}>
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${catDocs.length > 0 ? 'bg-teal-100' : isDragging ? 'bg-teal-200' : 'bg-gray-100'}`}>
                       {catDocs.length > 0 ? (
                         <CheckCircle2 className="w-5 h-5 text-teal-600" />
                       ) : (
-                        <Icon className="w-5 h-5 text-gray-400" />
+                        <Icon className={`w-5 h-5 ${isDragging ? 'text-teal-600' : 'text-gray-400'}`} />
                       )}
                     </div>
                     <div>
                       <h3 className="font-medium text-gray-900">{cat.label}</h3>
-                      <p className="text-sm text-gray-500">{cat.description}</p>
+                      <p className="text-sm text-gray-500">
+                        {isDragging ? 'Drop file here' : cat.description}
+                      </p>
                     </div>
                   </div>
 

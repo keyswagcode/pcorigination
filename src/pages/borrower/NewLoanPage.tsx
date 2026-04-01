@@ -43,6 +43,8 @@ export function NewLoanPage() {
   const [desiredLoanAmount, setDesiredLoanAmount] = useState('');
   const [desiredLtv, setDesiredLtv] = useState('');
   const [rehabBudget, setRehabBudget] = useState('');
+  const [afterRepairValue, setAfterRepairValue] = useState('');
+  const [refinanceType, setRefinanceType] = useState<'rate_term' | 'cash_out' | ''>('');
 
   const [error, setError] = useState<string | null>(null);
 
@@ -104,9 +106,17 @@ export function NewLoanPage() {
     }
   };
 
-  const maxLoan = loanType === 'dscr' ? maxDscr : maxFixFlip;
+  const maxLoan = loanType === 'dscr' ? maxDscr : (loanType === 'bridge' ? maxDscr * 5 / 4 : maxFixFlip);
   const showRehabBudget = loanType === 'fix_flip' || loanType === 'bridge';
   const step = !loanPurpose ? 'purpose' : !loanType ? 'type' : 'details';
+
+  // Fix & Flip / Bridge loan amount constraints
+  const arvValue = parseCurrency(afterRepairValue);
+  const rehabValue = parseCurrency(rehabBudget);
+  const maxByArv = arvValue > 0 ? arvValue * 0.75 : Infinity;
+  const maxByPurchaseRehab = (value > 0 || rehabValue > 0) ? (value * 0.9) + (rehabValue * 1.0) : Infinity;
+  const fixFlipMaxLoan = showRehabBudget ? Math.min(maxByArv, maxByPurchaseRehab) : Infinity;
+  const loanExceedsFixFlipMax = showRehabBudget && amount > 0 && fixFlipMaxLoan !== Infinity && amount > fixFlipMaxLoan;
 
   const handleSubmit = async () => {
     if (!borrowerId || !loanPurpose || !loanType) return;
@@ -132,6 +142,9 @@ export function NewLoanPage() {
         estimated_value: propValue,
         loan_amount: loanAmount,
         ltv: Math.round(ltv * 100) / 100,
+        rehab_budget: showRehabBudget && rehabBudget ? parseCurrency(rehabBudget) : null,
+        after_repair_value: showRehabBudget && afterRepairValue ? parseCurrency(afterRepairValue) : null,
+        refinance_type: loanPurpose === 'refinance' ? refinanceType || null : null,
         status: 'submitted',
       });
 
@@ -242,7 +255,24 @@ export function NewLoanPage() {
       {/* Step 3: Property Details */}
       {step === 'details' && (
         <div className="space-y-5">
-          {maxLoan > 0 && (
+          {/* Refinance Type Selector */}
+          {loanPurpose === 'refinance' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Refinance Type *</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" onClick={() => setRefinanceType('rate_term')}
+                  className={`px-4 py-3 border-2 rounded-lg text-sm font-medium transition-all ${refinanceType === 'rate_term' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-200 text-gray-700 hover:border-gray-300'}`}>
+                  Rate & Term
+                </button>
+                <button type="button" onClick={() => setRefinanceType('cash_out')}
+                  className={`px-4 py-3 border-2 rounded-lg text-sm font-medium transition-all ${refinanceType === 'cash_out' ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-200 text-gray-700 hover:border-gray-300'}`}>
+                  Cash-Out
+                </button>
+              </div>
+            </div>
+          )}
+
+          {maxLoan > 0 && loanPurpose !== 'refinance' && (
             <div className="bg-teal-50 border border-teal-100 rounded-lg px-4 py-3 text-sm text-teal-700">
               <DollarSign className="w-4 h-4 inline mr-1" />
               Pre-approved up to <strong>${maxLoan.toLocaleString()}</strong>
@@ -307,21 +337,56 @@ export function NewLoanPage() {
             <p className="text-xs text-gray-500 -mt-3">Calculated LTV: {calculatedLtv}%</p>
           )}
 
-          {amount > maxLoan && maxLoan > 0 && (
+          {amount > maxLoan && maxLoan > 0 && loanPurpose !== 'refinance' && (
             <p className="text-xs text-amber-600 -mt-3">This exceeds your pre-approved maximum of ${maxLoan.toLocaleString()}</p>
           )}
 
-          {/* Rehab Budget (Fix & Flip / Bridge only) */}
+          {/* Rehab Budget + ARV (Fix & Flip / Bridge only) */}
           {showRehabBudget && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Rehab Budget</label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
-                <input type="text" value={rehabBudget} onChange={e => setRehabBudget(formatCurrency(e.target.value))}
-                  className="w-full pl-8 pr-4 py-3 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-                  placeholder="75,000" />
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Rehab Budget</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                    <input type="text" value={rehabBudget} onChange={e => setRehabBudget(formatCurrency(e.target.value))}
+                      className="w-full pl-8 pr-4 py-3 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
+                      placeholder="75,000" />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">Estimated renovation cost</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">After Repair Value (ARV)</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                    <input type="text" value={afterRepairValue} onChange={e => setAfterRepairValue(formatCurrency(e.target.value))}
+                      className="w-full pl-8 pr-4 py-3 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
+                      placeholder="500,000" />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">Estimated value after rehab</p>
+                </div>
               </div>
-              <p className="text-xs text-gray-500 mt-1">Estimated cost for renovation/rehab work</p>
+
+              {/* Loan limit info */}
+              {(arvValue > 0 || rehabValue > 0) && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 space-y-1">
+                  {arvValue > 0 && (
+                    <p className="text-xs text-gray-600">Max loan (75% of ARV): <span className="font-medium">${Math.round(maxByArv).toLocaleString()}</span></p>
+                  )}
+                  {(value > 0 || rehabValue > 0) && (
+                    <p className="text-xs text-gray-600">Max loan (90% purchase + 100% rehab): <span className="font-medium">${Math.round(maxByPurchaseRehab).toLocaleString()}</span></p>
+                  )}
+                  {fixFlipMaxLoan !== Infinity && (
+                    <p className="text-xs font-medium text-gray-900">Maximum allowed: ${Math.round(fixFlipMaxLoan).toLocaleString()}</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {loanExceedsFixFlipMax && (
+            <div className="px-4 py-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">
+              Loan amount exceeds the maximum of ${Math.round(fixFlipMaxLoan).toLocaleString()}. The total loan cannot exceed 75% of ARV or 90% of purchase price + 100% of rehab budget.
             </div>
           )}
 
@@ -331,7 +396,7 @@ export function NewLoanPage() {
 
           <button
             onClick={handleSubmit}
-            disabled={isLoading || !propertyAddress || !propertyValue || !desiredLoanAmount}
+            disabled={isLoading || !propertyAddress || !propertyValue || !desiredLoanAmount || loanExceedsFixFlipMax || (loanPurpose === 'refinance' && !refinanceType)}
             className="w-full py-3 px-4 bg-teal-600 text-white font-medium rounded-lg hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
           >
             {isLoading ? (

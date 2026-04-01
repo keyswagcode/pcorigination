@@ -4,8 +4,9 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { createLinkToken, exchangePublicToken } from '../../services/plaidService';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
+import { verifyLiquidityFromStatements } from '../../services/bankStatementService';
 import {
-  Building2, Upload, CheckCircle2, DollarSign, Plus, Download,
+  Building2, CheckCircle2, DollarSign, Plus, Download,
   Shield, Banknote, FileText, ArrowRight, Loader2, AlertCircle
 } from 'lucide-react';
 
@@ -14,6 +15,8 @@ interface BorrowerData {
   borrower_name: string;
   credit_score: number | null;
   lifecycle_stage: string | null;
+  entity_type: string | null;
+  llc_name: string | null;
 }
 
 interface FinancialProfile {
@@ -47,13 +50,15 @@ export function BorrowerHomePage() {
   const [plaidLoading, setPlaidLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
+  const [llcName, setLlcName] = useState('');
 
   const loadData = useCallback(async () => {
     if (!user) return;
 
     const { data: borrowerData } = await supabase
       .from('borrowers')
-      .select('id, borrower_name, credit_score, lifecycle_stage')
+      .select('id, borrower_name, credit_score, lifecycle_stage, entity_type, llc_name')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -63,6 +68,7 @@ export function BorrowerHomePage() {
     }
 
     setBorrower(borrowerData);
+    if (borrowerData.llc_name) setLlcName(borrowerData.llc_name);
 
     const [profileResult, preApprovalResult] = await Promise.all([
       supabase
@@ -88,6 +94,7 @@ export function BorrowerHomePage() {
   const confirmedLiquidity = financialProfile?.liquidity_estimate || 0;
   const dscrMax = confirmedLiquidity * 4;
   const fixFlipMax = confirmedLiquidity * 10;
+  const bridgeMax = confirmedLiquidity * 5;
   const hasPreApproval = preApprovals.length > 0;
 
   // Plaid Link handler
@@ -124,13 +131,19 @@ export function BorrowerHomePage() {
   };
 
   // PDF upload handler
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || !borrower) return;
     setUploadLoading(true);
     setError(null);
+    setUploadSuccess(null);
 
     try {
+      const uploadedFilePaths: string[] = [];
+      const uploadedFileNames: string[] = [];
+
       for (const file of Array.from(files)) {
         const filePath = `${borrower.id}/${Date.now()}_${file.name}`;
 
@@ -146,25 +159,56 @@ export function BorrowerHomePage() {
           file_path: filePath,
           mime_type: file.type,
           file_size: file.size,
-          processing_status: 'pending',
+          processing_status: 'processing',
         });
+
+        uploadedFilePaths.push(filePath);
+        uploadedFileNames.push(file.name);
       }
 
-      // Update lifecycle stage
-      await supabase.from('borrowers')
-        .update({ lifecycle_stage: 'documents_uploaded' })
-        .eq('id', borrower.id);
+      setUploadSuccess(`Uploaded ${uploadedFileNames.join(', ')}. Analyzing your bank statements...`);
+
+      // AI extraction — read the bank statements and verify liquidity
+      const result = await verifyLiquidityFromStatements(borrower.id, uploadedFilePaths);
+
+      // Update document statuses to completed
+      for (const filePath of uploadedFilePaths) {
+        await supabase.from('uploaded_documents')
+          .update({ processing_status: 'completed' })
+          .eq('file_path', filePath);
+      }
+
+      setUploadSuccess(
+        `Verified! Found $${result.totalLiquidity.toLocaleString()} in liquidity across ${result.extractions.length} account(s). ` +
+        `Pre-approvals generated: DSCR up to $${(result.totalLiquidity * 4).toLocaleString()}, ` +
+        `Fix & Flip / Bridge up to $${(result.totalLiquidity * 10).toLocaleString()}.`
+      );
 
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      setError(err instanceof Error ? err.message : 'Upload or analysis failed. Please try again or contact your broker.');
     } finally {
       setUploadLoading(false);
     }
   };
 
+  const getCustomAmount = (pa: PreApprovalData) => {
+    const custom = customAmounts[pa.id];
+    if (custom) {
+      const parsed = parseInt(custom.replace(/\D/g, ''));
+      if (parsed > 0 && parsed <= pa.prequalified_amount) return parsed;
+    }
+    return pa.prequalified_amount;
+  };
+
+  const formatCurrency = (value: string) => {
+    const num = value.replace(/\D/g, '');
+    return num ? parseInt(num).toLocaleString() : '';
+  };
+
   const handleDownloadPdf = async (pa: PreApprovalData) => {
     if (!borrower) return;
+    const pdfAmount = getCustomAmount(pa);
     try {
       // Fetch broker info
       const { data: borrowerFull } = await supabase
@@ -174,16 +218,22 @@ export function BorrowerHomePage() {
         .maybeSingle();
 
       let brokerName = 'Your Broker';
+      let brokerEmail: string | null = null;
+      let brokerPhone: string | null = null;
       let orgName = '';
       let orgLogoUrl: string | null = null;
 
       if (borrowerFull?.broker_id) {
         const { data: broker } = await supabase
           .from('user_accounts')
-          .select('first_name, last_name')
+          .select('first_name, last_name, email, phone')
           .eq('id', borrowerFull.broker_id)
           .maybeSingle();
-        if (broker) brokerName = [broker.first_name, broker.last_name].filter(Boolean).join(' ');
+        if (broker) {
+          brokerName = [broker.first_name, broker.last_name].filter(Boolean).join(' ');
+          brokerEmail = broker.email;
+          brokerPhone = broker.phone;
+        }
 
         // Try to get org branding
         const { data: orgMember } = await supabase
@@ -192,7 +242,7 @@ export function BorrowerHomePage() {
           .eq('user_id', borrowerFull.broker_id)
           .maybeSingle();
         if (orgMember?.organizations) {
-          const org = orgMember.organizations as { name: string; logo_url: string | null };
+          const org = orgMember.organizations as unknown as { name: string; logo_url: string | null };
           orgName = org.name || '';
           orgLogoUrl = org.logo_url || null;
         }
@@ -203,22 +253,23 @@ export function BorrowerHomePage() {
       expiry.setDate(expiry.getDate() + 90);
 
       await generatePreApprovalPdf({
-        orgName: orgName || 'PC Origination',
+        orgName: orgName || 'Key Real Estate Capital',
         orgLogoUrl,
         borrowerName: borrower.borrower_name,
-        preApprovalAmount: pa.prequalified_amount,
+        llcName: llcName || null,
+        preApprovalAmount: pdfAmount,
         loanType: pa.loan_type || 'dscr',
+        loanPurpose: 'purchase',
+        occupancy: 'Investment',
+        propertyType: 'SFR',
         verifiedLiquidity: confirmedLiquidity,
         creditScore: borrower.credit_score,
         expirationDate: expiry.toLocaleDateString(),
         brokerName,
+        brokerEmail,
+        brokerPhone,
         issueDate: today.toLocaleDateString(),
-        conditions: [
-          'Subject to final underwriting review',
-          'Verification of all submitted documentation',
-          'Satisfactory property appraisal',
-          'Title insurance and clear title',
-        ],
+        conditions: [],
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate PDF');
@@ -230,7 +281,7 @@ export function BorrowerHomePage() {
 
     const dscrAmount = liquidity * 4;
     const fixFlipAmount = liquidity * 10;
-    const bridgeAmount = liquidity * 10;
+    const bridgeAmount = liquidity * 5;
 
     await supabase.from('pre_approvals').insert([
       {
@@ -268,7 +319,7 @@ export function BorrowerHomePage() {
         qualification_max: bridgeAmount,
         verified_liquidity: liquidity,
         passes_liquidity_check: true,
-        summary: `Bridge Loan Pre-Approval: Up to $${bridgeAmount.toLocaleString()} based on $${liquidity.toLocaleString()} verified liquidity (10x multiplier)`,
+        summary: `Bridge Loan Pre-Approval: Up to $${bridgeAmount.toLocaleString()} based on $${liquidity.toLocaleString()} verified liquidity (5x multiplier)`,
         machine_decision: 'approved',
         machine_confidence: 95,
       },
@@ -387,6 +438,13 @@ export function BorrowerHomePage() {
             </div>
           )}
 
+          {uploadSuccess && (
+            <div className="mt-4 px-4 py-3 bg-green-50 border border-green-100 rounded-lg text-sm text-green-700 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              {uploadSuccess}
+            </div>
+          )}
+
           {liquidityVerified && financialProfile?.summary && (
             <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="bg-white border border-teal-100 rounded-lg px-4 py-3">
@@ -402,8 +460,8 @@ export function BorrowerHomePage() {
                 <p className="text-xl font-semibold text-teal-700">${fixFlipMax.toLocaleString()}</p>
               </div>
               <div className="bg-white border border-teal-100 rounded-lg px-4 py-3">
-                <p className="text-xs text-gray-500">Bridge Max (10x)</p>
-                <p className="text-xl font-semibold text-teal-700">${fixFlipMax.toLocaleString()}</p>
+                <p className="text-xs text-gray-500">Bridge Max (5x)</p>
+                <p className="text-xl font-semibold text-teal-700">${bridgeMax.toLocaleString()}</p>
               </div>
             </div>
           )}
@@ -435,28 +493,75 @@ export function BorrowerHomePage() {
 
           {hasPreApproval && (
             <div className="mt-4 space-y-3">
-              {preApprovals.map((pa) => (
-                <div key={pa.id} className="bg-white border border-teal-100 rounded-lg px-5 py-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-gray-900">{LOAN_TYPE_LABELS[pa.loan_type || ''] || pa.loan_type || 'Loan'}</p>
-                    <p className="text-sm text-gray-500 mt-0.5">Pre-approved up to</p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-teal-700">${pa.prequalified_amount?.toLocaleString()}</p>
+              {/* LLC Name */}
+              <div className="bg-white border border-teal-100 rounded-xl px-5 py-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {borrower.entity_type && borrower.entity_type !== 'individual'
+                    ? 'LLC / Entity Name (pre-approval will be issued in this name)'
+                    : 'LLC / Entity Name (optional — leave blank for individual)'}
+                </label>
+                <input
+                  type="text"
+                  value={llcName}
+                  onChange={e => setLlcName(e.target.value)}
+                  onBlur={() => {
+                    // Save LLC name to borrower record
+                    if (borrower) {
+                      supabase.from('borrowers').update({ llc_name: llcName || null }).eq('id', borrower.id);
+                    }
+                  }}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
+                  placeholder="e.g. Smith Capital Investments LLC"
+                />
+              </div>
+
+              {preApprovals.map((pa) => {
+                const customVal = customAmounts[pa.id] || '';
+                const effectiveAmount = getCustomAmount(pa);
+                const isCustom = customVal && effectiveAmount !== pa.prequalified_amount;
+
+                return (
+                  <div key={pa.id} className="bg-white border border-teal-100 rounded-xl px-5 py-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-gray-900">{LOAN_TYPE_LABELS[pa.loan_type || ''] || pa.loan_type || 'Loan'}</p>
+                        <p className="text-sm text-gray-500 mt-0.5">Pre-approved up to <span className="font-medium text-teal-700">${pa.prequalified_amount?.toLocaleString()}</span></p>
+                      </div>
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full">Approved</span>
                     </div>
-                    <button
-                      onClick={() => handleDownloadPdf(pa)}
-                      className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
-                      title="Download Pre-Approval Letter"
-                    >
-                      <Download className="w-4 h-4" />
-                      PDF
-                    </button>
+                    <div className="mt-3 flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-500 mb-1">Amount for letter</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                          <input
+                            type="text"
+                            value={customVal || pa.prequalified_amount.toLocaleString()}
+                            onChange={e => {
+                              const formatted = formatCurrency(e.target.value);
+                              const parsed = parseInt(formatted.replace(/\D/g, '')) || 0;
+                              if (parsed <= pa.prequalified_amount) {
+                                setCustomAmounts(prev => ({ ...prev, [pa.id]: formatted }));
+                              }
+                            }}
+                            className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
+                          />
+                        </div>
+                        {isCustom && (
+                          <p className="text-xs text-gray-400 mt-1">Max: ${pa.prequalified_amount.toLocaleString()}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleDownloadPdf(pa)}
+                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 transition-colors"
+                      >
+                        <Download className="w-4 h-4" />
+                        Download PDF
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

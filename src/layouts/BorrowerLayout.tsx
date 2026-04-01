@@ -58,7 +58,10 @@ export function BorrowerLayout() {
 
             <div className="flex items-center gap-2">
               {userAccount && (
-                <div className="hidden sm:flex items-center gap-2 pr-3 border-r border-gray-200">
+                <Link
+                  to="/application/profile"
+                  className="hidden sm:flex items-center gap-2 pr-3 border-r border-gray-200 hover:opacity-80 transition-opacity"
+                >
                   <div className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center">
                     <span className="text-sm font-medium text-teal-700">
                       {userAccount.first_name?.[0]}{userAccount.last_name?.[0]}
@@ -67,7 +70,7 @@ export function BorrowerLayout() {
                   <span className="text-sm text-gray-600">
                     {userAccount.first_name}
                   </span>
-                </div>
+                </Link>
               )}
               <button
                 onClick={() => window.location.href = 'mailto:support@example.com'}

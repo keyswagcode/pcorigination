@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   ArrowLeft, User, FileText, DollarSign, Briefcase, MessageSquare,
-  Upload, Clock, CheckCircle2, XCircle, Loader2, Send, Trash2,
+  Upload, CheckCircle2, Loader2, Send, Trash2,
   Edit3, Save, X
 } from 'lucide-react';
 

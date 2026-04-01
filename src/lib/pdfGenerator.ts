@@ -8,12 +8,18 @@ export interface PreApprovalPdfOptions {
   orgName: string;
   orgLogoUrl: string | null;
   borrowerName: string;
+  llcName: string | null;
   preApprovalAmount: number;
   loanType: string;
+  loanPurpose: string;
+  occupancy: string;
+  propertyType: string;
   verifiedLiquidity: number;
   creditScore: number | null;
   expirationDate: string;
   brokerName: string;
+  brokerEmail: string | null;
+  brokerPhone: string | null;
   issueDate: string;
   conditions: string[];
 }
@@ -42,181 +48,167 @@ async function loadImageAsBase64(url: string): Promise<string | null> {
 export async function generatePreApprovalPdf(opts: PreApprovalPdfOptions): Promise<void> {
   const doc = new jsPDF({ unit: 'pt', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 50;
+  const margin = 60;
   const contentWidth = pageWidth - margin * 2;
   let y = margin;
 
   const fmtCurrency = (n: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
 
-  // --- HEADER ---
-  // Try to load org logo
+  const labelCol = margin;
+  const valueCol = margin + 160;
+
+  // --- COMPANY LOGO ---
   if (opts.orgLogoUrl) {
     const logoBase64 = await loadImageAsBase64(opts.orgLogoUrl);
     if (logoBase64) {
       try {
-        doc.addImage(logoBase64, 'PNG', margin, y, 60, 60);
-      } catch { /* skip logo if unsupported format */ }
+        doc.addImage(logoBase64, 'PNG', margin, y, 180, 60);
+        y += 75;
+      } catch {
+        // Skip logo, use text fallback
+        doc.setFontSize(20);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 30, 46);
+        doc.text(opts.orgName, margin, y + 20);
+        y += 40;
+      }
     }
+  } else {
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 46);
+    doc.text(opts.orgName || 'Pre-Approval Letter', margin, y + 20);
+    y += 40;
   }
 
-  doc.setFontSize(22);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(13, 148, 136); // teal-600
-  doc.text(opts.orgName || 'Loan Pre-Approval', opts.orgLogoUrl ? margin + 72 : margin, y + 22);
-
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139); // gray-500
-  doc.text('Pre-Approval Letter', opts.orgLogoUrl ? margin + 72 : margin, y + 38);
-
-  // Date on right
-  doc.setFontSize(10);
-  doc.setTextColor(100, 116, 139);
-  doc.text(`Issued: ${opts.issueDate}`, pageWidth - margin, y + 22, { align: 'right' });
-  doc.text(`Valid Until: ${opts.expirationDate}`, pageWidth - margin, y + 38, { align: 'right' });
-
-  y += 70;
-
-  // Divider
-  doc.setDrawColor(13, 148, 136);
-  doc.setLineWidth(2);
-  doc.line(margin, y, pageWidth - margin, y);
-  y += 30;
-
-  // --- GREETING ---
+  // --- RE: LINE ---
+  y += 10;
   doc.setFontSize(12);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('helvetica', 'bold');
   doc.setTextColor(30, 30, 46);
-  doc.text(`Dear ${opts.borrowerName},`, margin, y);
+  const purposeLabel = opts.loanPurpose === 'refinance' ? 'Refinance' : 'Purchase';
+  doc.text(`RE: Conditional Approval to ${purposeLabel}:`, margin, y);
   y += 24;
 
-  doc.setFontSize(11);
-  doc.setTextColor(71, 85, 105);
-  const introText = 'We are pleased to inform you that based on the information provided and our underwriting analysis, you have been pre-approved for financing under the following terms:';
-  const introLines = doc.splitTextToSize(introText, contentWidth);
-  doc.text(introLines, margin, y);
-  y += introLines.length * 16 + 16;
-
-  // --- PRE-APPROVAL AMOUNT BOX ---
-  const boxHeight = 80;
-  doc.setFillColor(240, 253, 250); // teal-50
-  doc.setDrawColor(13, 148, 136);
-  doc.setLineWidth(1.5);
-  doc.roundedRect(margin, y, contentWidth, boxHeight, 8, 8, 'FD');
-
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 118, 110);
-  doc.text('PRE-APPROVED LOAN AMOUNT', pageWidth / 2, y + 22, { align: 'center' });
-
-  doc.setFontSize(36);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(13, 148, 136);
-  doc.text(fmtCurrency(opts.preApprovalAmount), pageWidth / 2, y + 56, { align: 'center' });
-
-  doc.setFontSize(10);
+  // --- CONGRATULATIONS PARAGRAPH ---
+  doc.setFontSize(10.5);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text(LOAN_TYPE_DISPLAY[opts.loanType] || opts.loanType, pageWidth / 2, y + 72, { align: 'center' });
+  doc.setTextColor(50, 50, 50);
+  const congrats = `Congratulations! After reviewing your application we have determined that your credit meets our requirements to conditionally approve you for a loan subject to the conditions below. While you're moving forward with the ${purposeLabel.toLowerCase()} of your new home, you may present a copy of this letter as proof to sellers and real estate agents that you're a qualified buyer subject to the conditions stated in this letter.`;
+  const congratsLines = doc.splitTextToSize(congrats, contentWidth);
+  doc.text(congratsLines, margin, y);
+  y += congratsLines.length * 15 + 20;
 
-  y += boxHeight + 24;
+  // --- BORROWER DETAILS TABLE ---
+  const drawDetailRow = (label: string, value: string) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 46);
+    doc.text(`${label}:`, labelCol, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(value, valueCol, y);
+    y += 20;
+  };
 
-  // --- DETAILS SECTION ---
-  doc.setFontSize(11);
+  const displayName = opts.llcName || opts.borrowerName;
+  drawDetailRow('Name', displayName);
+  drawDetailRow('Loan Purpose', purposeLabel);
+  drawDetailRow('Occupancy', opts.occupancy || 'Investment');
+  drawDetailRow('Loan Type', LOAN_TYPE_DISPLAY[opts.loanType] || opts.loanType);
+  drawDetailRow('Property Type', opts.propertyType || 'SFR');
+  drawDetailRow('Date', opts.issueDate);
+
+  y += 16;
+
+  // --- ESTIMATED PURCHASE PRICE ---
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 118, 110);
-  doc.text('DETAILS', margin, y);
-  y += 6;
-  doc.setDrawColor(226, 232, 240);
+  doc.setTextColor(30, 30, 46);
+  const priceLabel = opts.loanPurpose === 'refinance' ? 'Estimated As-Is Value:' : 'Estimated Purchase Price:';
+  doc.text(priceLabel, labelCol, y);
+  doc.setFontSize(13);
+  doc.text(fmtCurrency(opts.preApprovalAmount), valueCol + 40, y);
+
+  y += 40;
+
+  // --- CONDITIONS SECTION ---
+  doc.setDrawColor(180, 180, 180);
   doc.setLineWidth(0.5);
   doc.line(margin, y, pageWidth - margin, y);
-  y += 18;
+  y += 20;
 
-  const details = [
-    ['Loan Type', LOAN_TYPE_DISPLAY[opts.loanType] || opts.loanType],
-    ['Verified Liquidity', fmtCurrency(opts.verifiedLiquidity)],
-    ['Estimated Credit Score', opts.creditScore ? `${opts.creditScore}` : 'Not provided'],
-    ['Broker', opts.brokerName],
+  doc.setFontSize(10.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(50, 50, 50);
+  const conditionsIntro = 'To continue with the process of obtaining loan approval, you will need to satisfy the following conditions:';
+  const condIntroLines = doc.splitTextToSize(conditionsIntro, contentWidth);
+  doc.text(condIntroLines, margin, y);
+  y += condIntroLines.length * 15 + 12;
+
+  const conditions = [
+    `Within 30 calendar days from the date of this letter, deliver a fully executed ${purposeLabel.toLowerCase()} contract for your proposed subject property and your authorization to order an appraisal.`,
+    `The subject property will need to meet our normal and customary requirements for determining value, condition and title.`,
+    `Provide any necessary information required to complete your application.`,
+    `Your creditworthiness and financial position must not change materially and must meet ${opts.orgName}'s full lending qualifications.`,
+    `Satisfy all of ${opts.orgName}'s pre-closing and pre-funding loan conditions that are required to close and fund the loan.`,
   ];
 
-  doc.setFontSize(10);
-  const colWidth = contentWidth / 2;
-  for (let i = 0; i < details.length; i += 2) {
-    for (let j = 0; j < 2 && i + j < details.length; j++) {
-      const [label, value] = details[i + j];
-      const x = margin + j * colWidth;
-
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(100, 116, 139);
-      doc.text(label, x, y);
-
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(30, 30, 46);
-      doc.text(value, x, y + 14);
-    }
-    y += 36;
+  for (const condition of conditions) {
+    const bullet = '•  ';
+    const condLines = doc.splitTextToSize(condition, contentWidth - 20);
+    doc.text(bullet, margin, y);
+    doc.text(condLines, margin + 16, y);
+    y += condLines.length * 14 + 8;
   }
 
-  // --- CONDITIONS ---
-  if (opts.conditions.length > 0) {
-    y += 4;
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(15, 118, 110);
-    doc.text('CONDITIONS FOR FINAL APPROVAL', margin, y);
-    y += 6;
-    doc.setDrawColor(226, 232, 240);
-    doc.line(margin, y, pageWidth - margin, y);
-    y += 16;
+  y += 16;
 
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(71, 85, 105);
-    for (const condition of opts.conditions) {
-      doc.setTextColor(13, 148, 136);
-      doc.text('✓', margin, y);
-      doc.setTextColor(71, 85, 105);
-      const condLines = doc.splitTextToSize(condition, contentWidth - 20);
-      doc.text(condLines, margin + 16, y);
-      y += condLines.length * 14 + 6;
-    }
-  }
+  // --- DISCLAIMER ---
+  doc.setDrawColor(180, 180, 180);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 16;
 
-  // --- SIGNATURE ---
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(120, 120, 120);
+  const disclaimer = 'Your inquiry is not considered an application for credit until such time as you have chosen a property and locked your loan, the interest rate and loan terms detailed above may change. This is not an offer or commitment to extend credit.';
+  const discLines = doc.splitTextToSize(disclaimer, contentWidth);
+  doc.text(discLines, margin, y);
+
+  // --- AE CONTACT INFO ---
   y += 20;
-  doc.setDrawColor(226, 232, 240);
+  doc.setDrawColor(180, 180, 180);
   doc.line(margin, y, pageWidth - margin, y);
   y += 20;
 
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  const disclaimerText = 'This pre-approval is subject to final underwriting review, verification of all submitted documentation, property appraisal, and lender approval.';
-  const discLines = doc.splitTextToSize(disclaimerText, contentWidth);
-  doc.text(discLines, margin, y);
-  y += discLines.length * 14 + 24;
-
-  doc.setFontSize(12);
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(30, 30, 46);
   doc.text(opts.brokerName, margin, y);
   y += 16;
+
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text(opts.orgName || 'Lending Partner', margin, y);
+  doc.setTextColor(80, 80, 80);
+  if (opts.brokerEmail) {
+    doc.text(opts.brokerEmail, margin, y);
+    y += 14;
+  }
+  if (opts.brokerPhone) {
+    doc.text(opts.brokerPhone, margin, y);
+    y += 14;
+  }
+  doc.text(opts.orgName, margin, y);
 
   // --- FOOTER ---
-  const footerY = doc.internal.pageSize.getHeight() - 40;
+  const footerY = doc.internal.pageSize.getHeight() - 30;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(148, 163, 184);
-  doc.text('This is not a commitment to lend. Rates, terms, and conditions are subject to change without notice.', pageWidth / 2, footerY, { align: 'center' });
-  doc.text('Equal Housing Lender', pageWidth / 2, footerY + 12, { align: 'center' });
+  doc.setTextColor(160, 160, 160);
+  doc.text(`${opts.orgName} | Equal Housing Lender`, pageWidth / 2, footerY, { align: 'center' });
 
   // Download
-  const filename = `Pre-Approval_${opts.loanType}_${opts.borrowerName.replace(/\s+/g, '_')}.pdf`;
+  const filename = `Pre-Approval_${opts.loanType}_${(opts.llcName || opts.borrowerName).replace(/\s+/g, '_')}.pdf`;
   doc.save(filename);
 }
 
