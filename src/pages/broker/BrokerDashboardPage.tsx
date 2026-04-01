@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   Users, FileText, CheckCircle2, Clock, AlertCircle,
-  DollarSign, Loader2, Copy, Check, ArrowRight
+  DollarSign, Loader2, Copy, Check, ArrowRight, Search
 } from 'lucide-react';
 
 interface BorrowerSummary {
@@ -60,6 +60,7 @@ export function BrokerDashboardPage() {
   const [pendingLoans, setPendingLoans] = useState<LoanPending[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     async function loadData() {
@@ -189,76 +190,100 @@ export function BrokerDashboardPage() {
         </div>
       </div>
 
-      {/* Loans Awaiting Review */}
+      {/* Search */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900">Loans Awaiting Review</h2>
-          <span className="text-sm text-gray-500">{pendingLoans.length} pending</span>
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
+            placeholder="Search by borrower name, LLC, property, phone, or email..."
+          />
         </div>
-        {pendingLoans.length === 0 ? (
-          <div className="border border-gray-200 rounded-xl bg-white p-8 text-center">
-            <CheckCircle2 className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500">No loans awaiting review</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {pendingLoans.map(loan => (
-              <Link
-                key={loan.id}
-                to={`/internal/loans/${loan.id}/review`}
-                className="flex items-center justify-between px-5 py-4 border border-gray-200 rounded-xl bg-white hover:border-teal-300 hover:bg-teal-50/30 transition-colors"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-                    <Clock className="w-5 h-5 text-amber-600" />
-                  </div>
+
+        {search && (() => {
+          const q = search.toLowerCase();
+          const results = borrowers.filter(b =>
+            b.borrower_name.toLowerCase().includes(q) ||
+            (b.email || '').toLowerCase().includes(q) ||
+            (b.credit_score && String(b.credit_score).includes(q))
+          );
+
+          // Also search loans
+          const loanResults = pendingLoans.filter(l =>
+            (l.scenario_name || '').toLowerCase().includes(q) ||
+            (l.borrower_name || '').toLowerCase().includes(q)
+          );
+
+          return (
+            <div className="mt-3 border border-gray-200 rounded-xl bg-white divide-y divide-gray-100 max-h-[400px] overflow-y-auto">
+              {results.length === 0 && loanResults.length === 0 && (
+                <p className="px-5 py-4 text-sm text-gray-500 text-center">No results found</p>
+              )}
+              {results.map(b => (
+                <Link key={b.id} to={`/internal/my-borrowers/${b.id}`}
+                  className="flex items-center justify-between px-5 py-3 hover:bg-teal-50 transition-colors">
                   <div>
-                    <p className="font-medium text-gray-900">{loan.scenario_name}</p>
-                    <p className="text-sm text-gray-500">{loan.borrower_name} &middot; {loan.loan_type?.toUpperCase()}</p>
+                    <p className="text-sm font-medium text-gray-900">{b.borrower_name}</p>
+                    <p className="text-xs text-gray-500">{b.email}</p>
                   </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  {loan.loan_amount && (
-                    <span className="text-lg font-semibold text-gray-900">${loan.loan_amount.toLocaleString()}</span>
-                  )}
-                  <ArrowRight className="w-4 h-4 text-gray-400" />
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
+                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${STAGE_COLORS[b.lifecycle_stage || ''] || 'bg-gray-100 text-gray-600'}`}>
+                    {STAGE_LABELS[b.lifecycle_stage || ''] || 'New'}
+                  </span>
+                </Link>
+              ))}
+              {loanResults.map(l => (
+                <Link key={l.id} to={`/internal/loans/${l.id}/review`}
+                  className="flex items-center justify-between px-5 py-3 hover:bg-teal-50 transition-colors">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{l.scenario_name}</p>
+                    <p className="text-xs text-gray-500">{l.borrower_name} &middot; Loan</p>
+                  </div>
+                  <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">{l.status}</span>
+                </Link>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="border border-gray-200 rounded-xl bg-white px-5 py-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Users className="w-4 h-4 text-gray-400" />
-            <span className="text-sm text-gray-500">Total Borrowers</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{borrowers.length}</p>
-        </div>
-        <div className="border border-gray-200 rounded-xl bg-white px-5 py-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock className="w-4 h-4 text-amber-500" />
-            <span className="text-sm text-gray-500">Pending Review</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{pendingLoans.length}</p>
-        </div>
-        <div className="border border-gray-200 rounded-xl bg-white px-5 py-4">
-          <div className="flex items-center gap-2 mb-2">
-            <CheckCircle2 className="w-4 h-4 text-teal-500" />
-            <span className="text-sm text-gray-500">Pre-Approved</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{borrowers.filter(b => b.lifecycle_stage === 'pre_approved').length}</p>
-        </div>
-        <div className="border border-gray-200 rounded-xl bg-white px-5 py-4">
-          <div className="flex items-center gap-2 mb-2">
-            <FileText className="w-4 h-4 text-blue-500" />
-            <span className="text-sm text-gray-500">Docs Uploaded</span>
-          </div>
-          <p className="text-2xl font-bold text-gray-900">{borrowers.filter(b => b.lifecycle_stage === 'documents_uploaded').length}</p>
-        </div>
+      {/* New Borrowers */}
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">New Borrowers</h2>
+        {(() => {
+          const newBorrowers = borrowers.filter(b => (b.lifecycle_stage || 'profile_created') === 'profile_created');
+          return newBorrowers.length === 0 ? (
+            <div className="border border-gray-200 rounded-xl bg-white p-8 text-center">
+              <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500">No new borrowers</p>
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-xl bg-white divide-y divide-gray-100">
+              {newBorrowers.map(b => (
+                <Link key={b.id} to={`/internal/my-borrowers/${b.id}`}
+                  className="flex items-center justify-between px-5 py-4 hover:bg-teal-50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-teal-100 rounded-full flex items-center justify-center">
+                      <span className="text-xs font-medium text-teal-700">
+                        {b.borrower_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{b.borrower_name}</p>
+                      <p className="text-xs text-gray-500">{b.email} {b.credit_score ? `· ${b.credit_score} CS` : ''}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400">{new Date(b.created_at).toLocaleDateString()}</span>
+                    <ArrowRight className="w-4 h-4 text-gray-400" />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
