@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
-  Link2, Copy, Check, Save, Upload, Image, Loader2, AlertCircle, CheckCircle2
+  Link2, Copy, Check, Save, Upload, Image, Loader2, AlertCircle, CheckCircle2,
+  UserPlus, Users, Trash2, Shield
 } from 'lucide-react';
 
 export function BrokerSettingsPage() {
@@ -18,7 +19,25 @@ export function BrokerSettingsPage() {
   const [copied, setCopied] = useState(false);
   const [slugError, setSlugError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  // Team members
+  interface TeamMember {
+    id: string;
+    user_id: string;
+    display_name: string | null;
+    email: string | null;
+    role: string | null;
+  }
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteFirstName, setInviteFirstName] = useState('');
+  const [inviteLastName, setInviteLastName] = useState('');
+  const [inviteRole, setInviteRole] = useState<'admin' | 'vp' | 'ae'>('ae');
+  const [inviting, setInviting] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{ email: string; tempPassword: string } | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -39,11 +58,77 @@ export function BrokerSettingsPage() {
         setOrgName(org.name || '');
         setWebhookUrl(org.zapier_webhook_url || '');
         setLogoUrl(org.logo_url || null);
+
+        // Load team members
+        const { data: members } = await supabase
+          .from('organization_members')
+          .select('id, user_id, display_name, email, role')
+          .eq('organization_id', org.id)
+          .eq('is_active', true);
+        setTeamMembers(members || []);
       }
       setIsLoading(false);
     }
     loadData();
   }, [user, userAccount]);
+
+  const loadTeamMembers = async () => {
+    if (!orgId) return;
+    const { data } = await supabase
+      .from('organization_members')
+      .select('id, user_id, display_name, email, role')
+      .eq('organization_id', orgId)
+      .eq('is_active', true);
+    setTeamMembers(data || []);
+  };
+
+  const handleInvite = async () => {
+    if (!inviteEmail || !inviteFirstName || !inviteLastName) return;
+    setInviting(true);
+    setError(null);
+    setInviteResult(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-team-member`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          email: inviteEmail,
+          first_name: inviteFirstName,
+          last_name: inviteLastName,
+          broker_role: inviteRole,
+          organization_id: orgId,
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Failed to invite');
+
+      setInviteResult({ email: inviteEmail, tempPassword: result.temp_password });
+      setSuccess(`Invited ${inviteFirstName} ${inviteLastName} as ${inviteRole.toUpperCase()}`);
+      setTimeout(() => setSuccess(null), 5000);
+      setInviteEmail('');
+      setInviteFirstName('');
+      setInviteLastName('');
+      setShowInviteForm(false);
+      await loadTeamMembers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to invite team member');
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    await supabase.from('organization_members').update({ is_active: false }).eq('id', memberId);
+    await loadTeamMembers();
+  };
 
   const fullPosUrl = posSlug ? `${window.location.origin}/apply/${posSlug}` : '';
 
@@ -234,6 +319,138 @@ export function BrokerSettingsPage() {
             <p className="text-xs text-gray-500 mt-2">Events fired: new borrower, doc upload, liquidity verified, pre-approval, loan submitted, loan approved/declined</p>
           </div>
         </div>
+      </div>
+
+      {/* Team Management */}
+      <div className="border border-gray-200 rounded-xl bg-white p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <Users className="w-5 h-5 text-teal-600" />
+            <h2 className="text-lg font-semibold text-gray-900">Team Members</h2>
+          </div>
+          {!showInviteForm && (
+            <button
+              onClick={() => { setShowInviteForm(true); setInviteResult(null); }}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
+            >
+              <UserPlus className="w-4 h-4" />
+              Invite Member
+            </button>
+          )}
+        </div>
+
+        {error && (
+          <div className="mb-4 px-4 py-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" /> {error}
+          </div>
+        )}
+
+        {/* Invite result with temp password */}
+        {inviteResult && (
+          <div className="mb-4 px-4 py-4 bg-teal-50 border border-teal-100 rounded-lg">
+            <p className="text-sm font-medium text-teal-800 mb-2">Invite sent to {inviteResult.email}</p>
+            <div className="bg-white rounded-lg px-3 py-2 border border-teal-200">
+              <p className="text-xs text-gray-500">Temporary Password (share with team member):</p>
+              <div className="flex items-center justify-between mt-1">
+                <code className="text-sm font-mono text-gray-900">{inviteResult.tempPassword}</code>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(inviteResult.tempPassword); }}
+                  className="text-xs text-teal-600 hover:text-teal-800"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">They will be prompted to change their password on first login.</p>
+          </div>
+        )}
+
+        {/* Invite form */}
+        {showInviteForm && (
+          <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">First Name *</label>
+                <input type="text" value={inviteFirstName} onChange={e => setInviteFirstName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="John" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Last Name *</label>
+                <input type="text" value={inviteLastName} onChange={e => setInviteLastName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="Doe" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Email *</label>
+              <input type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600" placeholder="john@company.com" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Role *</label>
+              <div className="grid grid-cols-3 gap-2">
+                {([['admin', 'Admin'], ['vp', 'VP'], ['ae', 'AE']] as const).map(([val, label]) => (
+                  <button key={val} type="button" onClick={() => setInviteRole(val)}
+                    className={`px-3 py-2 border-2 rounded-lg text-sm font-medium transition-all ${
+                      inviteRole === val ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                {inviteRole === 'admin' ? 'Can see all borrowers and manage team' :
+                 inviteRole === 'vp' ? 'Can see their borrowers + all AEs reporting to them' :
+                 'Can only see their own borrowers'}
+              </p>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => { setShowInviteForm(false); setError(null); }}
+                className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={handleInvite} disabled={inviting || !inviteEmail || !inviteFirstName || !inviteLastName}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
+                {inviting ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                Send Invite
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Team member list */}
+        {teamMembers.length > 0 ? (
+          <div className="divide-y divide-gray-100">
+            {teamMembers.map(member => (
+              <div key={member.id} className="py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center">
+                    <Shield className="w-4 h-4 text-gray-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{member.display_name || member.email}</p>
+                    <div className="flex items-center gap-2">
+                      {member.email && <span className="text-xs text-gray-500">{member.email}</span>}
+                      <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
+                        member.role === 'owner' ? 'bg-amber-100 text-amber-700' :
+                        member.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                        member.role === 'vp' ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {(member.role || 'ae').toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {member.user_id !== user?.id && (
+                  <button onClick={() => handleRemoveMember(member.id)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="Remove member">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400 text-center py-4">No team members yet. Invite your first team member above.</p>
+        )}
       </div>
     </div>
   );
