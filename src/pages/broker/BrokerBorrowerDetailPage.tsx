@@ -163,27 +163,44 @@ export function BrokerBorrowerDetailPage() {
   };
 
   const handleViewDoc = async (doc: UploadedDoc) => {
-    const { data } = await supabase.storage
-      .from('borrower-documents')
-      .createSignedUrl(doc.file_path, 3600);
-    if (data?.signedUrl) {
-      window.open(data.signedUrl, '_blank');
+    try {
+      const { data, error } = await supabase.storage
+        .from('borrower-documents')
+        .download(doc.file_path);
+      if (error) throw error;
+      if (data) {
+        const mimeType = doc.file_name.endsWith('.pdf') ? 'application/pdf' :
+          doc.file_name.match(/\.(jpg|jpeg)$/i) ? 'image/jpeg' :
+          doc.file_name.match(/\.(png)$/i) ? 'image/png' : 'application/octet-stream';
+        const blob = new Blob([data], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      }
+    } catch (err) {
+      console.error('View failed:', err);
+      alert('Failed to open document. Please try downloading instead.');
     }
   };
 
   const handleDownloadDoc = async (doc: UploadedDoc) => {
-    const { data } = await supabase.storage
-      .from('borrower-documents')
-      .download(doc.file_path);
-    if (data) {
-      const url = URL.createObjectURL(data);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = doc.file_name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+    try {
+      const { data, error } = await supabase.storage
+        .from('borrower-documents')
+        .download(doc.file_path);
+      if (error) throw error;
+      if (data) {
+        const url = URL.createObjectURL(data);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = doc.file_name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error('Download failed:', err);
+      alert('Failed to download document.');
     }
   };
 
