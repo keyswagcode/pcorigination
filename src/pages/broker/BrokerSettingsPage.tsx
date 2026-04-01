@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   Link2, Copy, Check, Save, Upload, Image, Loader2, AlertCircle, CheckCircle2,
-  UserPlus, Users, Trash2, Shield, Bell, BellOff
+  UserPlus, Users, Trash2, Shield, Star
 } from 'lucide-react';
 import { inviteTeamMember } from '../../services/teamInviteService';
 
@@ -146,6 +146,12 @@ export function BrokerSettingsPage() {
 
   const handleToggleNotify = async (memberId: string, current: boolean) => {
     await supabase.from('organization_members').update({ notify_new_apps: !current }).eq('id', memberId);
+    await loadTeamMembers();
+  };
+
+  const handleChangeRole = async (memberId: string, userId: string, newRole: string) => {
+    await supabase.from('organization_members').update({ role: newRole }).eq('id', memberId);
+    await supabase.from('user_accounts').update({ broker_role: newRole }).eq('id', userId);
     await loadTeamMembers();
   };
 
@@ -460,11 +466,19 @@ export function BrokerSettingsPage() {
                       <p className="text-sm font-medium text-gray-900">{member.display_name || member.email}</p>
                       <div className="flex items-center gap-2">
                         {member.email && <span className="text-xs text-gray-500">{member.email}</span>}
-                        <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
-                          member.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                          member.role === 'vp' ? 'bg-blue-100 text-blue-700' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>{(member.role || 'ae').toUpperCase()}</span>
+                        <select
+                          value={member.role || 'ae'}
+                          onChange={e => handleChangeRole(member.id, member.user_id, e.target.value)}
+                          className={`px-1.5 py-0.5 text-xs font-medium rounded border-0 cursor-pointer ${
+                            member.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                            member.role === 'vp' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          <option value="admin">ADMIN</option>
+                          <option value="vp">VP</option>
+                          <option value="ae">AE</option>
+                        </select>
                         <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-700">Pending</span>
                       </div>
                     </div>
@@ -501,14 +515,23 @@ export function BrokerSettingsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {member.email && <span className="text-xs text-gray-500">{member.email}</span>}
-                      <span className={`px-1.5 py-0.5 text-xs font-medium rounded ${
-                        member.role === 'owner' ? 'bg-amber-100 text-amber-700' :
-                        member.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                        member.role === 'vp' ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
-                        {(member.role || 'ae').toUpperCase()}
-                      </span>
+                      {member.role === 'owner' ? (
+                        <span className="px-1.5 py-0.5 text-xs font-medium rounded bg-amber-100 text-amber-700">OWNER</span>
+                      ) : (
+                        <select
+                          value={member.role || 'ae'}
+                          onChange={e => handleChangeRole(member.id, member.user_id, e.target.value)}
+                          className={`px-1.5 py-0.5 text-xs font-medium rounded border-0 cursor-pointer ${
+                            member.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                            member.role === 'vp' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          <option value="admin">ADMIN</option>
+                          <option value="vp">VP</option>
+                          <option value="ae">AE</option>
+                        </select>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -517,12 +540,12 @@ export function BrokerSettingsPage() {
                     onClick={() => handleToggleNotify(member.id, member.notify_new_apps)}
                     className={`p-1.5 rounded-lg transition-colors ${
                       member.notify_new_apps
-                        ? 'text-teal-600 bg-teal-50 hover:bg-teal-100'
-                        : 'text-gray-300 hover:text-gray-500 hover:bg-gray-100'
+                        ? 'text-amber-500 hover:text-amber-600'
+                        : 'text-gray-300 hover:text-gray-400'
                     }`}
-                    title={member.notify_new_apps ? 'Receiving new app alerts — click to disable' : 'Not receiving alerts — click to enable'}
+                    title={member.notify_new_apps ? 'Starred — receives new app alerts. Click to unstar.' : 'Not starred — click to receive new app alerts'}
                   >
-                    {member.notify_new_apps ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                    <Star className={`w-4 h-4 ${member.notify_new_apps ? 'fill-amber-400' : ''}`} />
                   </button>
                   {member.user_id !== user?.id && (
                     <button onClick={() => handleRemoveMember(member.id)}
