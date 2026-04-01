@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   Link2, Copy, Check, Save, Upload, Image, Loader2, AlertCircle, CheckCircle2,
-  UserPlus, Users, Trash2, Shield
+  UserPlus, Users, Trash2, Shield, Bell, BellOff
 } from 'lucide-react';
 import { inviteTeamMember } from '../../services/teamInviteService';
 
@@ -31,6 +31,7 @@ export function BrokerSettingsPage() {
     email: string | null;
     role: string | null;
     invite_status: string | null;
+    notify_new_apps: boolean;
   }
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -64,7 +65,7 @@ export function BrokerSettingsPage() {
         // Load team members
         const { data: members } = await supabase
           .from('organization_members')
-          .select('id, user_id, display_name, email, role, invite_status')
+          .select('id, user_id, display_name, email, role, invite_status, notify_new_apps')
           .eq('organization_id', org.id)
           .eq('is_active', true);
         setTeamMembers(members || []);
@@ -100,7 +101,7 @@ export function BrokerSettingsPage() {
     if (!orgId) return;
     const { data } = await supabase
       .from('organization_members')
-      .select('id, user_id, display_name, email, role, invite_status')
+      .select('id, user_id, display_name, email, role, invite_status, notify_new_apps')
       .eq('organization_id', orgId)
       .eq('is_active', true);
     setTeamMembers(data || []);
@@ -140,6 +141,11 @@ export function BrokerSettingsPage() {
 
   const handleRemoveMember = async (memberId: string) => {
     await supabase.from('organization_members').update({ is_active: false }).eq('id', memberId);
+    await loadTeamMembers();
+  };
+
+  const handleToggleNotify = async (memberId: string, current: boolean) => {
+    await supabase.from('organization_members').update({ notify_new_apps: !current }).eq('id', memberId);
     await loadTeamMembers();
   };
 
@@ -465,12 +471,25 @@ export function BrokerSettingsPage() {
                     </div>
                   </div>
                 </div>
-                {member.user_id !== user?.id && (
-                  <button onClick={() => handleRemoveMember(member.id)}
-                    className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="Remove member">
-                    <Trash2 className="w-4 h-4" />
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleToggleNotify(member.id, member.notify_new_apps)}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      member.notify_new_apps
+                        ? 'text-teal-600 bg-teal-50 hover:bg-teal-100'
+                        : 'text-gray-300 hover:text-gray-500 hover:bg-gray-100'
+                    }`}
+                    title={member.notify_new_apps ? 'Receiving new app alerts — click to disable' : 'Not receiving alerts — click to enable'}
+                  >
+                    {member.notify_new_apps ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
                   </button>
-                )}
+                  {member.user_id !== user?.id && (
+                    <button onClick={() => handleRemoveMember(member.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-500 transition-colors" title="Remove member">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

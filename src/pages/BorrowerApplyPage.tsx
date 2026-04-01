@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { ArrowRight, ArrowLeft, Eye, EyeOff, Building2, Shield } from 'lucide-react';
+import { sendNewApplicationAlert } from '../services/newAppAlertService';
 
 type Step = 'credentials' | 'profile';
 
@@ -163,6 +164,15 @@ export function BorrowerApplyPage() {
         lifecycle_stage: 'profile_created',
       });
       if (borrowerError) throw borrowerError;
+
+      // Send new application alert to broker + starred team members
+      if (resolvedBrokerId) {
+        sendNewApplicationAlert({
+          borrowerName: `${firstName} ${lastName}`.trim(),
+          borrowerEmail: email,
+          brokerId: resolvedBrokerId,
+        });
+      }
 
       navigate('/application', { replace: true });
     } catch (err: unknown) {
