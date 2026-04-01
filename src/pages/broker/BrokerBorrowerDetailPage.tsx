@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   ArrowLeft, User, FileText, DollarSign, Briefcase, MessageSquare,
-  Upload, CheckCircle2, Loader2, Send, Trash2,
+  Upload, CheckCircle2, Loader2, Send, Trash2, Download, Eye,
   Edit3, Save, X
 } from 'lucide-react';
 
@@ -162,6 +162,31 @@ export function BrokerBorrowerDetailPage() {
     await loadData();
   };
 
+  const handleViewDoc = async (doc: UploadedDoc) => {
+    const { data } = await supabase.storage
+      .from('borrower-documents')
+      .createSignedUrl(doc.file_path, 3600);
+    if (data?.signedUrl) {
+      window.open(data.signedUrl, '_blank');
+    }
+  };
+
+  const handleDownloadDoc = async (doc: UploadedDoc) => {
+    const { data } = await supabase.storage
+      .from('borrower-documents')
+      .download(doc.file_path);
+    if (data) {
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.file_name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  };
+
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 text-teal-600 animate-spin" /></div>;
   }
@@ -284,15 +309,41 @@ export function BrokerBorrowerDetailPage() {
           ) : (
             <div className="border border-gray-200 rounded-xl bg-white divide-y divide-gray-100">
               {documents.map(doc => (
-                <div key={doc.id} className="px-5 py-3 flex items-center justify-between">
+                <div key={doc.id} className="px-5 py-4 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <FileText className="w-4 h-4 text-gray-400" />
+                    <FileText className="w-5 h-5 text-gray-400" />
                     <div>
                       <p className="text-sm font-medium text-gray-900">{doc.file_name}</p>
-                      <p className="text-xs text-gray-500">{doc.document_type} &middot; {new Date(doc.created_at).toLocaleDateString()}</p>
+                      <p className="text-xs text-gray-500">
+                        {doc.document_type.replace(/_/g, ' ')} &middot; {new Date(doc.created_at).toLocaleDateString()}
+                        <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
+                          doc.processing_status === 'completed' || doc.processing_status === 'uploaded'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {doc.processing_status}
+                        </span>
+                      </p>
                     </div>
                   </div>
-                  <span className="text-xs text-gray-500 capitalize">{doc.processing_status}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleViewDoc(doc)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="View document"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      View
+                    </button>
+                    <button
+                      onClick={() => handleDownloadDoc(doc)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-teal-700 hover:bg-teal-50 rounded-lg transition-colors"
+                      title="Download document"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
