@@ -563,11 +563,10 @@ export function BrokerBorrowerDetailPage() {
               { label: 'Entity Type', key: 'entity_type', value: borrower.entity_type },
               { label: 'State', key: 'state_of_residence', value: borrower.state_of_residence },
               { label: 'Date of Birth', key: 'date_of_birth', value: borrower.date_of_birth },
-              { label: 'Address', key: 'address_street', value: [borrower.address_street, borrower.address_city, borrower.address_state, borrower.address_zip].filter(Boolean).join(', ') },
             ].map(field => (
               <div key={field.key} className="space-y-1">
                 <label className="text-xs font-medium text-gray-500 uppercase">{field.label}</label>
-                {editing && field.key !== 'address_street' ? (
+                {editing ? (
                   <input
                     type="text"
                     value={String(editData[field.key as keyof Borrower] ?? field.value ?? '')}
@@ -579,6 +578,54 @@ export function BrokerBorrowerDetailPage() {
                 )}
               </div>
             ))}
+          </div>
+          {/* Residential Address */}
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <label className="text-xs font-medium text-gray-500 uppercase mb-2 block">Residential Address</label>
+            {editing ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <input
+                    type="text"
+                    placeholder="Street address"
+                    value={String(editData.address_street ?? borrower.address_street ?? '')}
+                    onChange={e => setEditData({ ...editData, address_street: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  />
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="City"
+                    value={String(editData.address_city ?? borrower.address_city ?? '')}
+                    onChange={e => setEditData({ ...editData, address_city: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    placeholder="State"
+                    maxLength={2}
+                    value={String(editData.address_state ?? borrower.address_state ?? '')}
+                    onChange={e => setEditData({ ...editData, address_state: e.target.value.toUpperCase() })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  />
+                  <input
+                    type="text"
+                    placeholder="ZIP"
+                    maxLength={5}
+                    value={String(editData.address_zip ?? borrower.address_zip ?? '')}
+                    onChange={e => setEditData({ ...editData, address_zip: e.target.value.replace(/\D/g, '').slice(0, 5) })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  />
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-900">
+                {[borrower.address_street, borrower.address_city, borrower.address_state, borrower.address_zip].filter(Boolean).join(', ') || '—'}
+              </p>
+            )}
           </div>
         </div>
       )}

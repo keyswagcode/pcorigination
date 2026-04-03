@@ -557,6 +557,24 @@ function CoBorrowerSection({ borrowerId }: { borrowerId: string }) {
     }
   };
 
+  const handleResendInvite = async (cb: CoBorrower) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const newToken = crypto.randomUUID();
+      const { error: updateError } = await supabase
+        .from('co_borrowers')
+        .update({ invite_token: newToken, status: 'invited' })
+        .eq('id', cb.id);
+      if (updateError) throw updateError;
+      await loadCoBorrowers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resend invite');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     await supabase.from('co_borrowers').delete().eq('id', id);
     await loadCoBorrowers();
@@ -610,13 +628,26 @@ function CoBorrowerSection({ borrowerId }: { borrowerId: string }) {
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => handleDelete(cb.id)}
-                className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                {cb.status === 'invited' && (
+                  <button
+                    type="button"
+                    onClick={() => handleResendInvite(cb)}
+                    disabled={saving}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Resend
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleDelete(cb.id)}
+                  className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
