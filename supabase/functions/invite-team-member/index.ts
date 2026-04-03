@@ -54,24 +54,48 @@ serve(async (req) => {
     // Generate a temporary password
     const tempPassword = `Temp${Math.random().toString(36).slice(2, 8)}${Math.floor(Math.random() * 100)}!`
 
-    // Create the auth user
-    const { data: newUser, error: createError } = await serviceClient.auth.admin.createUser({
-      email,
-      password: tempPassword,
-      email_confirm: true,
-      user_metadata: { role: 'broker', broker_role, must_change_password: true },
-    })
+    const redirectUrl = req.headers.get('origin') || 'https://loanflowtech.com'
 
-    if (createError) {
-      return new Response(JSON.stringify({ error: createError.message }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
+    // Check if user already exists
+    const { data: existingUsers } = await serviceClient.auth.admin.listUsers()
+    const existingUser = existingUsers?.users?.find((u: { email?: string }) => u.email === email)
 
-    if (!newUser.user) {
-      return new Response(JSON.stringify({ error: 'Failed to create user' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    let userId: string
+
+    if (existingUser) {
+      userId = existingUser.id
+
+      await serviceClient.auth.admin.updateUser(userId, {
+        password: tempPassword,
+        user_metadata: { role: 'broker', broker_role, must_change_password: true },
       })
+
+      await serviceClient.auth.resetPasswordForEmail(email, {
+        redirectTo: `${redirectUrl}/reset-password`,
+      })
+    } else {
+      // Invite new user — sends actual email
+      const { data: inviteData, error: inviteError } = await serviceClient.auth.admin.inviteUserByEmail(email, {
+        data: { role: 'broker', broker_role, must_change_password: true },
+        redirectTo: `${redirectUrl}/login`,
+      })
+
+      if (inviteError) {
+        return new Response(JSON.stringify({ error: inviteError.message }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      if (!inviteData.user) {
+        return new Response(JSON.stringify({ error: 'Failed to create user' }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      userId = inviteData.user.id
+
+      // Set temp password so they can also log in directly
+      await serviceClient.auth.admin.updateUser(userId, { password: tempPassword })
     }
 
     // Update user_accounts with broker details
@@ -83,35 +107,44 @@ serve(async (req) => {
         user_role: 'broker',
         broker_role,
       })
-      .eq('id', newUser.user.id)
+      .eq('id', userId)
 
-    // Add to organization if provided
+    // Add to organization or reactivate
     if (organization_id) {
-      await serviceClient.from('organization_members').insert({
-        user_id: newUser.user.id,
-        organization_id,
-        role: broker_role,
-        display_name: `${first_name} ${last_name}`,
-        email,
-        is_active: true,
-      })
-    }
+      const { data: existingMember } = await serviceClient
+        .from('organization_members')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('organization_id', organization_id)
+        .maybeSingle()
 
-    // Send password reset email so they can set their own password
-    await serviceClient.auth.admin.generateLink({
-      type: 'recovery',
-      email,
-      options: {
-        redirectTo: `${req.headers.get('origin') || Deno.env.get('SUPABASE_URL')?.replace('.supabase.co', '')}/reset-password`,
-      },
-    })
+      if (existingMember) {
+        await serviceClient.from('organization_members').update({
+          role: broker_role,
+          display_name: `${first_name} ${last_name}`,
+          email,
+          is_active: true,
+          invite_status: 'pending',
+        }).eq('id', existingMember.id)
+      } else {
+        await serviceClient.from('organization_members').insert({
+          user_id: userId,
+          organization_id,
+          role: broker_role,
+          display_name: `${first_name} ${last_name}`,
+          email,
+          is_active: true,
+          invite_status: 'pending',
+        })
+      }
+    }
 
     return new Response(JSON.stringify({
       success: true,
-      user_id: newUser.user.id,
+      user_id: userId,
       email,
       temp_password: tempPassword,
-      message: `Invite sent to ${email}. They can log in with the temporary password or use the reset link in their email.`,
+      message: `Invite sent to ${email}. They will receive an email to set up their account.`,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

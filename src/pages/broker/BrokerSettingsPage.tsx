@@ -458,7 +458,7 @@ export function BrokerSettingsPage() {
               <Copy className="w-4 h-4" /> Copy All Credentials
             </button>
 
-            <p className="text-xs text-gray-500 mt-3">Note: Email invitations require SMTP configuration. For now, please share credentials manually.</p>
+            <p className="text-xs text-gray-500 mt-3">An email invite will be sent automatically. You can also share the credentials above directly.</p>
           </div>
         )}
 

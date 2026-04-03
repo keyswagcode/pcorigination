@@ -43,29 +43,37 @@ export async function inviteTeamMember(params: {
       // User already exists in auth — reuse their account
       userId = existingUser.id;
 
-      // Reset their password
+      // Reset their password and update metadata
       await adminClient.auth.admin.updateUser(userId, {
         password: tempPassword,
         user_metadata: { role: 'broker', broker_role: params.brokerRole, must_change_password: true },
       });
+
+      // Send a password reset email so they get an actual email
+      await adminClient.auth.resetPasswordForEmail(params.email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
     } else {
-      // Create new auth user
-      const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
-        email: params.email,
-        password: tempPassword,
-        email_confirm: true,
-        user_metadata: { role: 'broker', broker_role: params.brokerRole, must_change_password: true },
+      // Invite new user — this actually sends an email via Supabase Auth
+      const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(params.email, {
+        data: { role: 'broker', broker_role: params.brokerRole, must_change_password: true },
+        redirectTo: `${window.location.origin}/login`,
       });
 
-      if (createError) {
-        return { success: false, email: params.email, tempPassword: '', error: `Create user failed: ${createError.message}` };
+      if (inviteError) {
+        return { success: false, email: params.email, tempPassword: '', error: `Invite failed: ${inviteError.message}` };
       }
 
-      if (!newUser?.user) {
-        return { success: false, email: params.email, tempPassword: '', error: 'No user returned from create' };
+      if (!inviteData?.user) {
+        return { success: false, email: params.email, tempPassword: '', error: 'No user returned from invite' };
       }
 
-      userId = newUser.user.id;
+      userId = inviteData.user.id;
+
+      // Set the temp password so they can also log in directly
+      await adminClient.auth.admin.updateUser(userId, {
+        password: tempPassword,
+      });
     }
 
     // Update user_accounts with broker details
@@ -114,19 +122,6 @@ export async function inviteTeamMember(params: {
           console.error('Org member insert failed:', orgError);
         }
       }
-    }
-
-    // Send password reset email (best effort)
-    try {
-      await adminClient.auth.admin.generateLink({
-        type: 'recovery',
-        email: params.email,
-        options: {
-          redirectTo: `${window.location.origin}/reset-password`,
-        },
-      });
-    } catch (e) {
-      console.error('Reset email failed:', e);
     }
 
     return {
