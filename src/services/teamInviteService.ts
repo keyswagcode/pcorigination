@@ -33,23 +33,40 @@ export async function inviteTeamMember(params: {
   const tempPassword = `Temp${Math.random().toString(36).slice(2, 8)}${Math.floor(Math.random() * 100)}!`;
 
   try {
-    // Create auth user
-    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
-      email: params.email,
-      password: tempPassword,
-      email_confirm: true,
-      user_metadata: { role: 'broker', broker_role: params.brokerRole, must_change_password: true },
-    });
+    // Check if user already exists in auth
+    const { data: existingUsers } = await adminClient.auth.admin.listUsers();
+    const existingUser = existingUsers?.users?.find(u => u.email === params.email);
 
-    if (createError) {
-      return { success: false, email: params.email, tempPassword: '', error: `Create user failed: ${createError.message}` };
+    let userId: string;
+
+    if (existingUser) {
+      // User already exists in auth — reuse their account
+      userId = existingUser.id;
+
+      // Reset their password
+      await adminClient.auth.admin.updateUser(userId, {
+        password: tempPassword,
+        user_metadata: { role: 'broker', broker_role: params.brokerRole, must_change_password: true },
+      });
+    } else {
+      // Create new auth user
+      const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+        email: params.email,
+        password: tempPassword,
+        email_confirm: true,
+        user_metadata: { role: 'broker', broker_role: params.brokerRole, must_change_password: true },
+      });
+
+      if (createError) {
+        return { success: false, email: params.email, tempPassword: '', error: `Create user failed: ${createError.message}` };
+      }
+
+      if (!newUser?.user) {
+        return { success: false, email: params.email, tempPassword: '', error: 'No user returned from create' };
+      }
+
+      userId = newUser.user.id;
     }
-
-    if (!newUser?.user) {
-      return { success: false, email: params.email, tempPassword: '', error: 'No user returned from create' };
-    }
-
-    const userId = newUser.user.id;
 
     // Update user_accounts with broker details
     const { error: updateError } = await adminClient
@@ -66,19 +83,36 @@ export async function inviteTeamMember(params: {
       console.error('Update user_accounts failed:', updateError);
     }
 
-    // Add to organization
+    // Add to organization or reactivate existing membership
     if (params.organizationId) {
-      const { error: orgError } = await adminClient.from('organization_members').insert({
-        user_id: userId,
-        organization_id: params.organizationId,
-        role: params.brokerRole,
-        display_name: `${params.firstName} ${params.lastName}`,
-        email: params.email,
-        is_active: true,
-        invite_status: 'pending',
-      });
-      if (orgError) {
-        console.error('Org member insert failed:', orgError);
+      const { data: existingMember } = await adminClient
+        .from('organization_members')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('organization_id', params.organizationId)
+        .maybeSingle();
+
+      if (existingMember) {
+        await adminClient.from('organization_members').update({
+          role: params.brokerRole,
+          display_name: `${params.firstName} ${params.lastName}`,
+          email: params.email,
+          is_active: true,
+          invite_status: 'pending',
+        }).eq('id', existingMember.id);
+      } else {
+        const { error: orgError } = await adminClient.from('organization_members').insert({
+          user_id: userId,
+          organization_id: params.organizationId,
+          role: params.brokerRole,
+          display_name: `${params.firstName} ${params.lastName}`,
+          email: params.email,
+          is_active: true,
+          invite_status: 'pending',
+        });
+        if (orgError) {
+          console.error('Org member insert failed:', orgError);
+        }
       }
     }
 
