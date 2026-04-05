@@ -16,18 +16,31 @@ export async function inviteTeamMember(params: {
   organizationId: string | null;
 }): Promise<InviteResult> {
   try {
-    const { data, error } = await supabase.functions.invoke('invite-team-member', {
-      body: {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return { success: false, email: params.email, tempPassword: '', error: 'Not authenticated' };
+    }
+
+    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-team-member`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({
         email: params.email,
         first_name: params.firstName,
         last_name: params.lastName,
         broker_role: params.brokerRole,
         organization_id: params.organizationId,
-      },
+      }),
     });
 
-    if (error) {
-      return { success: false, email: params.email, tempPassword: '', error: error.message };
+    const data = await res.json();
+
+    if (!res.ok) {
+      return { success: false, email: params.email, tempPassword: '', error: data?.error || `Server error: ${res.status}` };
     }
 
     if (!data?.success) {
