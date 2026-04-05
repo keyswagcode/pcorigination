@@ -2,11 +2,31 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTeam } from '../../components/team/TeamContext';
 import {
   Users, FileText, CheckCircle2, Clock, AlertCircle,
   DollarSign, Loader2, Copy, Check, ArrowRight, Search
 } from 'lucide-react';
 import { logAudit } from '../../services/auditService';
+import type { OrganizationMember } from '../../shared/types';
+
+/** Returns the list of user_ids whose borrowers the current member can see */
+function getVisibleBrokerIds(member: OrganizationMember, members: OrganizationMember[]): string[] {
+  const role = member.role;
+  if (role === 'owner' || role === 'admin') {
+    // Owner/Admin see all borrowers in the org
+    return members.map(m => m.user_id);
+  }
+  if (role === 'vp') {
+    // VP sees their own + anyone they invited
+    const inviteeIds = members
+      .filter(m => m.invited_by_user_id === member.user_id)
+      .map(m => m.user_id);
+    return [member.user_id, ...inviteeIds];
+  }
+  // AE sees only their own
+  return [member.user_id];
+}
 
 interface BorrowerSummary {
   id: string;
@@ -57,6 +77,7 @@ const PIPELINE_STAGES = [
 
 export function BrokerDashboardPage() {
   const { user, userAccount } = useAuth();
+  const { member, members } = useTeam();
   const [borrowers, setBorrowers] = useState<BorrowerSummary[]>([]);
   const [pendingLoans, setPendingLoans] = useState<LoanPending[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -67,13 +88,16 @@ export function BrokerDashboardPage() {
 
   useEffect(() => {
     async function loadData() {
-      if (!user) return;
+      if (!user || !member) return;
 
-      // Fetch borrowers for this broker (scoped by RLS)
+      // Build list of broker_ids this user can see based on role
+      const visibleBrokerIds = getVisibleBrokerIds(member, members);
+
+      // Fetch borrowers scoped by role hierarchy
       const { data: borrowerData } = await supabase
         .from('borrowers')
         .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at')
-        .eq('broker_id', user.id)
+        .in('broker_id', visibleBrokerIds)
         .order('created_at', { ascending: false });
       setBorrowers(borrowerData || []);
 
@@ -99,7 +123,7 @@ export function BrokerDashboardPage() {
       setIsLoading(false);
     }
     loadData();
-  }, [user]);
+  }, [user, member, members]);
 
   const handleDrop = async (borrowerId: string, newStage: string) => {
     setDragBorrowerId(null);

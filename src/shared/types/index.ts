@@ -61,6 +61,8 @@ export interface OrganizationMember {
   display_name?: string;
   email?: string;
   is_active: boolean;
+  invited_by_user_id?: string;
+  invite_status?: string;
 }
 
 export type LifecycleStage =

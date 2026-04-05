@@ -7,6 +7,27 @@ import {
 } from 'lucide-react';
 import { inviteTeamMember } from '../../services/teamInviteService';
 
+/** Determine if currentUser can edit targetMember */
+function canEditMember(currentRole: string, currentUserId: string, targetMember: { user_id: string; role: string | null; invited_by_user_id?: string | null }): boolean {
+  const targetRole = targetMember.role || 'ae';
+  // Nobody can edit the owner except themselves
+  if (targetRole === 'owner') return currentUserId === targetMember.user_id;
+  // Can't edit yourself via this flow (use profile)
+  if (currentUserId === targetMember.user_id) return false;
+  // Owner can edit everyone
+  if (currentRole === 'owner') return true;
+  // Admin can edit VPs and AEs (not other admins or owner)
+  if (currentRole === 'admin') return targetRole === 'vp' || targetRole === 'ae';
+  // VP can edit their own invitees
+  if (currentRole === 'vp') return targetMember.invited_by_user_id === currentUserId;
+  return false;
+}
+
+/** Determine if currentUser can invite new members */
+function canInviteMembers(currentRole: string): boolean {
+  return ['owner', 'admin', 'vp'].includes(currentRole);
+}
+
 export function BrokerSettingsPage() {
   const { user, userAccount } = useAuth();
   const [posSlug, setPosSlug] = useState('');
@@ -32,8 +53,11 @@ export function BrokerSettingsPage() {
     role: string | null;
     invite_status: string | null;
     notify_new_apps: boolean;
+    invited_by_user_id: string | null;
   }
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const currentMember = teamMembers.find(m => m.user_id === user?.id);
+  const myRole = currentMember?.role || 'ae';
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteFirstName, setInviteFirstName] = useState('');
@@ -65,7 +89,7 @@ export function BrokerSettingsPage() {
         // Load team members
         const { data: members } = await supabase
           .from('organization_members')
-          .select('id, user_id, display_name, email, role, invite_status, notify_new_apps')
+          .select('id, user_id, display_name, email, role, invite_status, notify_new_apps, invited_by_user_id')
           .eq('organization_id', org.id)
           .eq('is_active', true);
         setTeamMembers(members || []);
@@ -101,7 +125,7 @@ export function BrokerSettingsPage() {
     if (!orgId) return;
     const { data } = await supabase
       .from('organization_members')
-      .select('id, user_id, display_name, email, role, invite_status, notify_new_apps')
+      .select('id, user_id, display_name, email, role, invite_status, notify_new_apps, invited_by_user_id')
       .eq('organization_id', orgId)
       .eq('is_active', true);
     setTeamMembers(data || []);
@@ -389,7 +413,7 @@ export function BrokerSettingsPage() {
             <Users className="w-5 h-5 text-teal-600" />
             <h2 className="text-lg font-semibold text-gray-900">Team Members</h2>
           </div>
-          {!showInviteForm && (
+          {!showInviteForm && canInviteMembers(myRole) && (
             <button
               onClick={() => { setShowInviteForm(true); setInviteResult(null); }}
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
@@ -631,7 +655,7 @@ export function BrokerSettingsPage() {
                     >
                       <Star className={`w-4 h-4 ${member.notify_new_apps ? 'fill-amber-400' : ''}`} />
                     </button>
-                    {member.user_id !== user?.id && (
+                    {canEditMember(myRole, user?.id || '', { user_id: member.user_id, role: member.role, invited_by_user_id: member.invited_by_user_id }) && (
                       <>
                         <button onClick={() => startEditMember(member)}
                           className="p-1.5 text-gray-400 hover:text-teal-600 transition-colors" title="Edit member">

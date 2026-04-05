@@ -35,7 +35,7 @@ export async function getOrganizationForUser(userId: string): Promise<{ organiza
 export async function getOrganizationMembers(organizationId: string): Promise<OrganizationMember[]> {
   const { data } = await supabase
     .from('organization_members')
-    .select('id, user_id, organization_id, role, display_name, email, is_active')
+    .select('id, user_id, organization_id, role, display_name, email, is_active, invited_by_user_id, invite_status')
     .eq('organization_id', organizationId)
     .eq('is_active', true)
     .order('display_name');

@@ -85,14 +85,14 @@ serve(async (req) => {
     // Verify the caller is authenticated using their JWT
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ error: 'No authorization header provided' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
     const token = authHeader.replace('Bearer ', '')
     const { data: { user: caller }, error: authError } = await serviceClient.auth.getUser(token)
     if (authError || !caller) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ error: `Auth failed: ${authError?.message || 'no user returned'}` }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
@@ -218,6 +218,7 @@ serve(async (req) => {
           email,
           is_active: true,
           invite_status: 'pending',
+          invited_by_user_id: caller.id,
         }).eq('id', existingMember.id)
 
         if (orgUpdateError) {
@@ -235,6 +236,7 @@ serve(async (req) => {
           email,
           is_active: true,
           invite_status: 'pending',
+          invited_by_user_id: caller.id,
         })
 
         if (orgInsertError) {

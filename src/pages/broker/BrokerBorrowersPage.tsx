@@ -2,7 +2,23 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTeam } from '../../components/team/TeamContext';
 import { Users, Search, Loader2, ArrowRight, Plus, Upload, X, Download, CheckCircle2, AlertCircle } from 'lucide-react';
+import type { OrganizationMember } from '../../shared/types';
+
+function getVisibleBrokerIds(member: OrganizationMember, members: OrganizationMember[]): string[] {
+  const role = member.role;
+  if (role === 'owner' || role === 'admin') {
+    return members.map(m => m.user_id);
+  }
+  if (role === 'vp') {
+    const inviteeIds = members
+      .filter(m => m.invited_by_user_id === member.user_id)
+      .map(m => m.user_id);
+    return [member.user_id, ...inviteeIds];
+  }
+  return [member.user_id];
+}
 
 interface BorrowerRow {
   id: string;
@@ -34,6 +50,7 @@ const STAGE_COLORS: Record<string, string> = {
 
 export function BrokerBorrowersPage() {
   const { user } = useAuth();
+  const { member, members } = useTeam();
   const [borrowers, setBorrowers] = useState<BorrowerRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -62,17 +79,18 @@ export function BrokerBorrowersPage() {
   const [csvError, setCsvError] = useState<string | null>(null);
 
   async function loadData() {
-    if (!user) return;
+    if (!user || !member) return;
+    const visibleBrokerIds = getVisibleBrokerIds(member, members);
     const { data } = await supabase
       .from('borrowers')
       .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at, updated_at')
-      .eq('broker_id', user.id)
+      .in('broker_id', visibleBrokerIds)
       .order('created_at', { ascending: false });
     setBorrowers(data || []);
     setIsLoading(false);
   }
 
-  useEffect(() => { loadData(); }, [user]);
+  useEffect(() => { loadData(); }, [user, member, members]);
 
   const handleAddBorrower = async () => {
     if (!user || !addName) return;
