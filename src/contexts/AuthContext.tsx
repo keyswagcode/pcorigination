@@ -34,6 +34,17 @@ async function fetchUserAccount(authUserId: string): Promise<UserAccount | null>
     .select('id, first_name, last_name, email, user_role, pos_slug')
     .eq('id', authUserId)
     .maybeSingle();
+
+  // Activate any pending org memberships on login
+  if (account) {
+    supabase
+      .from('organization_members')
+      .update({ invite_status: 'active' })
+      .eq('user_id', authUserId)
+      .eq('invite_status', 'pending')
+      .then(() => {});
+  }
+
   return account;
 }
 
