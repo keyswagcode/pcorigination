@@ -4,7 +4,6 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { createLinkToken, exchangePublicToken } from '../../services/plaidService';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
-import { verifyLiquidityFromStatements } from '../../services/bankStatementService';
 import {
   Building2, CheckCircle2, DollarSign, Plus, Download,
   Shield, Banknote, FileText, ArrowRight, Loader2, AlertCircle
@@ -135,17 +134,31 @@ export function BorrowerHomePage() {
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || !borrower) return;
+    if (!files || !borrower || !user) return;
     setUploadLoading(true);
     setError(null);
     setUploadSuccess(null);
 
     try {
-      const uploadedFilePaths: string[] = [];
       const uploadedFileNames: string[] = [];
 
+      // 1. Create an intake submission so the edge function can process it
+      const { data: submission, error: subError } = await supabase
+        .from('intake_submissions')
+        .insert({
+          borrower_id: borrower.id,
+          status: 'submitted',
+          processing_stage: 'documents_uploading',
+        })
+        .select('id')
+        .single();
+      if (subError || !submission) throw subError || new Error('Failed to create submission');
+
+      const submissionId = submission.id;
+
+      // 2. Upload files and create uploaded_documents linked to the submission
       for (const file of Array.from(files)) {
-        const filePath = `${borrower.id}/${Date.now()}_${file.name}`;
+        const filePath = `borrowers/${user.id}/financial/${Date.now()}_${file.name}`;
 
         const { error: uploadError } = await supabase.storage
           .from('borrower-documents')
@@ -154,34 +167,149 @@ export function BorrowerHomePage() {
 
         await supabase.from('uploaded_documents').insert({
           borrower_id: borrower.id,
+          intake_submission_id: submissionId,
           document_type: 'bank_statement',
           file_name: file.name,
           file_path: filePath,
           mime_type: file.type,
-          file_size: file.size,
-          processing_status: 'processing',
+          file_size_bytes: file.size,
+          processing_status: 'pending',
         });
 
-        uploadedFilePaths.push(filePath);
         uploadedFileNames.push(file.name);
       }
 
       setUploadSuccess(`Uploaded ${uploadedFileNames.join(', ')}. Analyzing your bank statements...`);
 
-      // AI extraction — read the bank statements and verify liquidity
-      const result = await verifyLiquidityFromStatements(borrower.id, uploadedFilePaths);
+      // 3. Call the process-documents edge function
+      await supabase
+        .from('intake_submissions')
+        .update({ processing_stage: 'documents_processing' })
+        .eq('id', submissionId);
 
-      // Update document statuses to completed
-      for (const filePath of uploadedFilePaths) {
-        await supabase.from('uploaded_documents')
-          .update({ processing_status: 'completed' })
-          .eq('file_path', filePath);
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-documents`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ submission_id: submissionId }),
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => '');
+        console.error('Edge function error:', response.status, errBody);
       }
 
+      // 4. Poll for bank_statement_accounts results
+      let accounts: Record<string, unknown>[] = [];
+      const { data: immediateAccounts } = await supabase
+        .from('bank_statement_accounts')
+        .select('*')
+        .eq('intake_submission_id', submissionId);
+
+      if (immediateAccounts && immediateAccounts.length > 0) {
+        accounts = immediateAccounts;
+      } else {
+        // Poll up to 36 seconds
+        for (let i = 0; i < 12; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          const { data: polled } = await supabase
+            .from('bank_statement_accounts')
+            .select('*')
+            .eq('intake_submission_id', submissionId);
+          if (polled && polled.length > 0) {
+            accounts = polled;
+            break;
+          }
+        }
+      }
+
+      if (accounts.length === 0) {
+        throw new Error('Could not extract data from your bank statements. Please ensure you upload clear PDF or image files.');
+      }
+
+      // 5. Compute liquidity from extracted accounts
+      const totalLiquidity = accounts.reduce((sum, a) => sum + (Number(a.closing_balance) || 0), 0);
+      const avgConfidence = accounts.reduce((sum, a) => sum + (Number(a.confidence) || 0), 0) / accounts.length;
+
+      // Update borrower financial profile
+      await supabase.from('borrower_financial_profiles').upsert({
+        borrower_id: borrower.id,
+        liquidity_estimate: totalLiquidity,
+        ending_balance_avg: totalLiquidity / accounts.length,
+        avg_monthly_deposits: accounts.reduce((sum, a) => sum + (Number(a.total_deposits) || 0), 0) / accounts.length,
+        confidence_score: Math.round(avgConfidence * 100),
+        summary: {
+          source: 'ai_extraction',
+          extractions: accounts.map(a => ({
+            bank: a.bank_name,
+            holder: a.account_holder_name,
+            closing_balance: a.closing_balance,
+            deposits: a.total_deposits,
+            withdrawals: a.total_withdrawals,
+          })),
+          total_liquidity: totalLiquidity,
+          verified_at: new Date().toISOString(),
+        },
+      }, { onConflict: 'borrower_id' });
+
+      // Generate pre-approvals
+      const dscrAmount = totalLiquidity * 4;
+      const fixFlipAmount = totalLiquidity * 10;
+      const bridgeAmount = totalLiquidity * 5;
+
+      await supabase.from('pre_approvals').delete().eq('borrower_id', borrower.id);
+      await supabase.from('pre_approvals').insert([
+        {
+          borrower_id: borrower.id,
+          loan_type: 'dscr',
+          status: 'approved',
+          sub_status: 'pre_approved',
+          prequalified_amount: dscrAmount,
+          qualification_max: dscrAmount,
+          verified_liquidity: totalLiquidity,
+          passes_liquidity_check: true,
+          summary: `DSCR Loan Pre-Approval: Up to $${dscrAmount.toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity`,
+          machine_decision: 'approved',
+          machine_confidence: Math.round(avgConfidence * 100),
+        },
+        {
+          borrower_id: borrower.id,
+          loan_type: 'fix_flip',
+          status: 'approved',
+          sub_status: 'pre_approved',
+          prequalified_amount: fixFlipAmount,
+          qualification_max: fixFlipAmount,
+          verified_liquidity: totalLiquidity,
+          passes_liquidity_check: true,
+          summary: `Fix & Flip Pre-Approval: Up to $${fixFlipAmount.toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity`,
+          machine_decision: 'approved',
+          machine_confidence: Math.round(avgConfidence * 100),
+        },
+        {
+          borrower_id: borrower.id,
+          loan_type: 'bridge',
+          status: 'approved',
+          sub_status: 'pre_approved',
+          prequalified_amount: bridgeAmount,
+          qualification_max: bridgeAmount,
+          verified_liquidity: totalLiquidity,
+          passes_liquidity_check: true,
+          summary: `Bridge Loan Pre-Approval: Up to $${bridgeAmount.toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity`,
+          machine_decision: 'approved',
+          machine_confidence: Math.round(avgConfidence * 100),
+        },
+      ]);
+
+      await supabase.from('borrowers')
+        .update({ lifecycle_stage: 'pre_approved', borrower_status: 'prequalified' })
+        .eq('id', borrower.id);
+
       setUploadSuccess(
-        `Verified! Found $${result.totalLiquidity.toLocaleString()} in liquidity across ${result.extractions.length} account(s). ` +
-        `Pre-approvals generated: DSCR up to $${(result.totalLiquidity * 4).toLocaleString()}, ` +
-        `Fix & Flip / Bridge up to $${(result.totalLiquidity * 10).toLocaleString()}.`
+        `Verified! Found $${totalLiquidity.toLocaleString()} in liquidity across ${accounts.length} account(s). ` +
+        `Pre-approvals generated: DSCR up to $${dscrAmount.toLocaleString()}, ` +
+        `Fix & Flip / Bridge up to $${fixFlipAmount.toLocaleString()}.`
       );
 
       await loadData();
