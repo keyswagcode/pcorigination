@@ -176,7 +176,7 @@ export function BorrowerHomePage() {
           file_name: file.name,
           file_path: filePath,
           mime_type: file.type,
-          file_size_bytes: file.size,
+          file_size: file.size,
           processing_status: 'pending',
         });
         if (docError) {
