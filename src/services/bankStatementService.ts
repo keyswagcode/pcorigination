@@ -27,26 +27,16 @@ Always respond with valid JSON only, no markdown or extra text. Use this exact s
 }
 If you cannot determine a value, use 0 for numbers and "Unknown" for strings. Set confidence lower if data is unclear.`;
 
-async function extractViaFileUpload(fileData: Blob, fileName: string): Promise<ExtractionResult> {
-  // Step 1: Upload file to OpenAI
-  const formData = new FormData();
-  formData.append('file', fileData, fileName);
-  formData.append('purpose', 'assistants');
+function toBase64(blob: Blob): Promise<string> {
+  return blob.arrayBuffer().then(buf =>
+    btoa(new Uint8Array(buf).reduce((data, byte) => data + String.fromCharCode(byte), ''))
+  );
+}
 
-  const uploadRes = await fetch('https://api.openai.com/v1/files', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-    body: formData,
-  });
+/** PDFs: use OpenAI Responses API with inline base64 file */
+async function extractPdf(fileData: Blob, fileName: string): Promise<ExtractionResult> {
+  const base64 = await toBase64(fileData);
 
-  if (!uploadRes.ok) {
-    throw new Error(`File upload failed: ${uploadRes.status}`);
-  }
-
-  const uploadResult = await uploadRes.json();
-  const fileId = uploadResult.id;
-
-  // Step 2: Use responses API with the uploaded file
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
@@ -54,7 +44,7 @@ async function extractViaFileUpload(fileData: Blob, fileName: string): Promise<E
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       input: [
         {
           role: 'system',
@@ -65,7 +55,8 @@ async function extractViaFileUpload(fileData: Blob, fileName: string): Promise<E
           content: [
             {
               type: 'input_file',
-              file_id: fileId,
+              filename: fileName,
+              file_data: `data:application/pdf;base64,${base64}`,
             },
             {
               type: 'input_text',
@@ -78,27 +69,23 @@ async function extractViaFileUpload(fileData: Blob, fileName: string): Promise<E
   });
 
   if (!response.ok) {
-    // Fallback to chat completions with image approach
-    throw new Error(`Responses API failed: ${response.status}`);
+    const errBody = await response.text();
+    console.error('Responses API error:', response.status, errBody);
+    throw new Error(`Responses API failed: ${response.status} - ${errBody.slice(0, 200)}`);
   }
 
   const result = await response.json();
-  const content = result.output?.[0]?.content?.[0]?.text || '';
-
-  // Clean up the uploaded file
-  fetch(`https://api.openai.com/v1/files/${fileId}`, {
-    method: 'DELETE',
-    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
-  }).catch(() => {});
+  const content = result.output?.[0]?.content?.[0]?.text
+    || result.output?.find((o: any) => o.type === 'message')?.content?.[0]?.text
+    || '';
 
   return parseExtractionResponse(content);
 }
 
-async function extractViaVision(fileData: Blob, mimeType = 'image/png'): Promise<ExtractionResult> {
-  const arrayBuffer = await fileData.arrayBuffer();
-  const base64 = btoa(
-    new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-  );
+/** Images: use Chat Completions vision API */
+async function extractImage(fileData: Blob): Promise<ExtractionResult> {
+  const base64 = await toBase64(fileData);
+  const mimeType = fileData.type || 'image/png';
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -125,7 +112,7 @@ async function extractViaVision(fileData: Blob, mimeType = 'image/png'): Promise
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Vision API failed: ${response.status} - ${err}`);
+    throw new Error(`Vision API failed: ${response.status} - ${err.slice(0, 200)}`);
   }
 
   const result = await response.json();
@@ -145,7 +132,6 @@ function parseExtractionResponse(content: string): ExtractionResult {
 }
 
 export async function extractBankStatement(filePath: string): Promise<ExtractionResult> {
-  // Download the file from Supabase storage
   const { data: fileData, error: downloadError } = await supabase.storage
     .from('borrower-documents')
     .download(filePath);
@@ -155,29 +141,17 @@ export async function extractBankStatement(filePath: string): Promise<Extraction
   }
 
   const isPdf = filePath.toLowerCase().endsWith('.pdf');
-  const isImage = /\.(png|jpg|jpeg|gif|webp)$/i.test(filePath);
 
-  // Try extraction methods in order of preference
-  const errors: string[] = [];
-
-  // For PDFs: try file upload API first
-  if (isPdf) {
-    try {
-      return await extractViaFileUpload(fileData, filePath.split('/').pop() || 'document.pdf');
-    } catch (err) {
-      errors.push(`File API: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  // Vision API — works for images and PDFs (gpt-4o supports PDF via base64)
   try {
-    const mimeType = isPdf ? 'application/pdf' : (isImage ? fileData.type || 'image/png' : 'image/png');
-    return await extractViaVision(fileData, mimeType);
+    if (isPdf) {
+      return await extractPdf(fileData, filePath.split('/').pop() || 'document.pdf');
+    } else {
+      return await extractImage(fileData);
+    }
   } catch (err) {
-    errors.push(`Vision API: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`Extraction failed for ${filePath}:`, err);
+    throw err;
   }
-
-  throw new Error(`All extraction methods failed: ${errors.join('; ')}`);
 }
 
 export async function verifyLiquidityFromStatements(
