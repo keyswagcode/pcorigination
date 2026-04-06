@@ -204,37 +204,45 @@ export function BorrowerHomePage() {
         body: JSON.stringify({ submission_id: submissionId }),
       });
 
+      const responseBody = await response.text().catch(() => '');
+      console.log('Edge function response:', response.status, responseBody);
+
       if (!response.ok) {
-        const errBody = await response.text().catch(() => '');
-        console.error('Edge function error:', response.status, errBody);
+        throw new Error(`Processing failed (${response.status}): ${responseBody.slice(0, 200)}`);
+      }
+
+      let edgeResult: { processed?: number; failed?: number; errors?: string[] } = {};
+      try { edgeResult = JSON.parse(responseBody); } catch { /* ignore parse error */ }
+      console.log('Edge function result:', edgeResult);
+
+      if (edgeResult.processed === 0 && edgeResult.failed && edgeResult.failed > 0) {
+        throw new Error(`Document processing failed: ${edgeResult.errors?.join('; ') || 'Unknown error'}`);
       }
 
       // 4. Poll for bank_statement_accounts results
       let accounts: Record<string, unknown>[] = [];
-      const { data: immediateAccounts } = await supabase
-        .from('bank_statement_accounts')
-        .select('*')
-        .eq('intake_submission_id', submissionId);
-
-      if (immediateAccounts && immediateAccounts.length > 0) {
-        accounts = immediateAccounts;
-      } else {
-        // Poll up to 36 seconds
-        for (let i = 0; i < 12; i++) {
-          await new Promise(r => setTimeout(r, 3000));
-          const { data: polled } = await supabase
-            .from('bank_statement_accounts')
-            .select('*')
-            .eq('intake_submission_id', submissionId);
-          if (polled && polled.length > 0) {
-            accounts = polled;
-            break;
-          }
+      // Try immediately first, then poll
+      for (let i = 0; i < 15; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, 3000));
+        const { data: polled } = await supabase
+          .from('bank_statement_accounts')
+          .select('*')
+          .eq('intake_submission_id', submissionId);
+        if (polled && polled.length > 0) {
+          accounts = polled;
+          break;
         }
       }
 
       if (accounts.length === 0) {
-        throw new Error('Could not extract data from your bank statements. Please ensure you upload clear PDF or image files.');
+        // Check document processing status for a better error message
+        const { data: docs } = await supabase
+          .from('uploaded_documents')
+          .select('processing_status, error_message')
+          .eq('intake_submission_id', submissionId);
+        const failedDocs = docs?.filter(d => d.processing_status === 'failed');
+        const errorDetail = failedDocs?.map(d => d.error_message).filter(Boolean).join('; ');
+        throw new Error(errorDetail || 'Could not extract data from your bank statements. Please ensure you upload clear PDF or image files.');
       }
 
       // 5. Compute liquidity from extracted accounts
