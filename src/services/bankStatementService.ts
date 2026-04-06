@@ -94,7 +94,7 @@ async function extractViaFileUpload(fileData: Blob, fileName: string): Promise<E
   return parseExtractionResponse(content);
 }
 
-async function extractViaVision(fileData: Blob): Promise<ExtractionResult> {
+async function extractViaVision(fileData: Blob, mimeType = 'image/png'): Promise<ExtractionResult> {
   const arrayBuffer = await fileData.arrayBuffer();
   const base64 = btoa(
     new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
@@ -107,14 +107,14 @@ async function extractViaVision(fileData: Blob): Promise<ExtractionResult> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [
         { role: 'system', content: EXTRACTION_PROMPT },
         {
           role: 'user',
           content: [
             { type: 'text', text: 'Extract the financial data from this bank statement. Return only the JSON object.' },
-            { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}` } },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
           ],
         },
       ],
@@ -169,57 +169,12 @@ export async function extractBankStatement(filePath: string): Promise<Extraction
     }
   }
 
-  // For images or as PDF fallback: try vision API
-  if (isImage) {
-    try {
-      return await extractViaVision(fileData);
-    } catch (err) {
-      errors.push(`Vision API: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  // Final fallback for PDFs: convert to base64 and try chat with text description
-  if (isPdf) {
-    try {
-      const arrayBuffer = await fileData.arrayBuffer();
-      const textDecoder = new TextDecoder('utf-8', { fatal: false });
-      const rawText = textDecoder.decode(arrayBuffer);
-
-      // Extract readable text from the PDF (basic text extraction)
-      const textMatches = rawText.match(/\(([^)]+)\)/g);
-      const extractedText = textMatches
-        ? textMatches.map(m => m.slice(1, -1)).join(' ').slice(0, 3000)
-        : rawText.replace(/[^\x20-\x7E\n]/g, ' ').replace(/\s+/g, ' ').slice(0, 3000);
-
-      if (extractedText.trim().length < 20) {
-        throw new Error('Could not extract readable text from PDF');
-      }
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: EXTRACTION_PROMPT },
-            { role: 'user', content: `Extract the financial data from this bank statement text:\n\n${extractedText}` },
-          ],
-          max_tokens: 1000,
-          temperature: 0,
-        }),
-      });
-
-      if (!response.ok) throw new Error(`Chat API: ${response.status}`);
-
-      const result = await response.json();
-      const content = result.choices?.[0]?.message?.content?.trim() || '';
-      return parseExtractionResponse(content);
-    } catch (err) {
-      errors.push(`Text fallback: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  // Vision API — works for images and PDFs (gpt-4o supports PDF via base64)
+  try {
+    const mimeType = isPdf ? 'application/pdf' : (isImage ? fileData.type || 'image/png' : 'image/png');
+    return await extractViaVision(fileData, mimeType);
+  } catch (err) {
+    errors.push(`Vision API: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   throw new Error(`All extraction methods failed: ${errors.join('; ')}`);
