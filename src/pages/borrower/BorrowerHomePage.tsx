@@ -146,13 +146,17 @@ export function BorrowerHomePage() {
       const { data: submission, error: subError } = await supabase
         .from('intake_submissions')
         .insert({
+          user_id: user.id,
           borrower_id: borrower.id,
           status: 'submitted',
           processing_stage: 'documents_uploading',
         })
         .select('id')
         .single();
-      if (subError || !submission) throw subError || new Error('Failed to create submission');
+      if (subError || !submission) {
+        console.error('Failed to create submission:', subError);
+        throw subError || new Error('Failed to create submission');
+      }
 
       const submissionId = submission.id;
 
@@ -165,7 +169,7 @@ export function BorrowerHomePage() {
           .upload(filePath, file);
         if (uploadError) throw uploadError;
 
-        await supabase.from('uploaded_documents').insert({
+        const { error: docError } = await supabase.from('uploaded_documents').insert({
           borrower_id: borrower.id,
           intake_submission_id: submissionId,
           document_type: 'bank_statement',
@@ -175,6 +179,10 @@ export function BorrowerHomePage() {
           file_size_bytes: file.size,
           processing_status: 'pending',
         });
+        if (docError) {
+          console.error('Failed to insert uploaded_document:', docError);
+          throw docError;
+        }
 
         uploadedFileNames.push(file.name);
       }
@@ -313,8 +321,12 @@ export function BorrowerHomePage() {
       );
 
       await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload or analysis failed. Please try again or contact your broker.');
+    } catch (err: unknown) {
+      console.error('Bank statement upload error:', err);
+      const message = err instanceof Error ? err.message
+        : typeof err === 'object' && err !== null && 'message' in err ? String((err as { message: unknown }).message)
+        : 'Upload or analysis failed. Please try again or contact your broker.';
+      setError(message);
     } finally {
       setUploadLoading(false);
     }
