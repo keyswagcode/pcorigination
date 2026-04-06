@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { supabase } from '../services/supabaseClient';
 import type { Session, User } from '@supabase/supabase-js';
@@ -17,6 +17,7 @@ interface AuthContextValue {
   user: User | null;
   userAccount: UserAccount | null;
   isLoading: boolean;
+  accountFetched: boolean;
   signOut: () => Promise<void>;
 }
 
@@ -25,6 +26,7 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   userAccount: null,
   isLoading: true,
+  accountFetched: false,
   signOut: async () => {},
 });
 
@@ -53,6 +55,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userAccount, setUserAccount] = useState<UserAccount | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [accountFetched, setAccountFetched] = useState(false);
+  const currentUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -64,11 +68,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setSession(data.session);
       setUser(data.session?.user ?? null);
+      currentUserIdRef.current = data.session?.user?.id ?? null;
 
       if (data.session?.user) {
         const account = await fetchUserAccount(data.session.user.id);
         if (mounted) {
           setUserAccount(account);
+          setAccountFetched(true);
         }
       }
 
@@ -82,17 +88,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       if (!mounted) return;
 
+      const prevUserId = currentUserIdRef.current;
+      const newUserId = newSession?.user?.id ?? null;
+      currentUserIdRef.current = newUserId;
+
       setSession(newSession);
       setUser(newSession?.user ?? null);
 
       if (newSession?.user) {
+        // Show loading state if the user changed (login/switch), not on token refresh
+        if (newUserId !== prevUserId) {
+          setIsLoading(true);
+          setAccountFetched(false);
+        }
         fetchUserAccount(newSession.user.id).then((account) => {
           if (mounted) {
             setUserAccount(account);
+            setAccountFetched(true);
+            setIsLoading(false);
           }
         });
       } else {
         setUserAccount(null);
+        setAccountFetched(false);
+        setIsLoading(false);
       }
     });
 
@@ -107,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, userAccount, isLoading, signOut }}>
+    <AuthContext.Provider value={{ session, user, userAccount, isLoading, accountFetched, signOut }}>
       {children}
     </AuthContext.Provider>
   );

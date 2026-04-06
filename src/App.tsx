@@ -23,9 +23,9 @@ import { BrokerSettingsPage } from './pages/broker/BrokerSettingsPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 
 function LoginGuard() {
-  const { user, userAccount, isLoading } = useAuth();
+  const { user, userAccount, isLoading, accountFetched } = useAuth();
 
-  if (isLoading) {
+  if (isLoading || (user && !accountFetched)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="flex items-center gap-3 text-gray-500">
@@ -47,10 +47,10 @@ function LoginGuard() {
 }
 
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
-  const { user, userAccount, isLoading } = useAuth();
+  const { user, userAccount, isLoading, accountFetched } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  if (isLoading || (user && !accountFetched)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="flex items-center gap-3 text-gray-500">
@@ -70,17 +70,23 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
     return <Navigate to={defaultRoute} replace />;
   }
 
+  // If userAccount is null (no DB row) but allowedRoles includes 'borrower', let them through
+  // Borrowers created via /apply may not have a user_accounts row with role set
+  if (allowedRoles && !userAccount && !allowedRoles.includes('borrower')) {
+    return <Navigate to="/login" replace />;
+  }
+
   return <>{children}</>;
 }
 
 function RoleBasedRedirect() {
-  const { user, userAccount, isLoading } = useAuth();
+  const { user, userAccount, isLoading, accountFetched } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
-    if (!isLoading && user) {
-const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
+    if (!isLoading && accountFetched && user) {
+      const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
 
       if (from && from !== '/login' && from !== '/') {
         navigate(from, { replace: true });
@@ -90,9 +96,9 @@ const from = (location.state as { from?: { pathname: string } })?.from?.pathname
         navigate('/application', { replace: true });
       }
     }
-  }, [isLoading, user, userAccount, navigate, location]);
+  }, [isLoading, accountFetched, user, userAccount, navigate, location]);
 
-  if (isLoading) {
+  if (isLoading || (user && !accountFetched)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="flex items-center gap-3 text-gray-500">
