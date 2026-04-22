@@ -68,10 +68,31 @@ export function BorrowerApplyPage() {
   }, [posSlug]);
 
   useEffect(() => {
-    if (!authLoading && user && userAccount?.user_role === 'borrower' && step !== 'profile') {
-      navigate('/application', { replace: true });
-    }
-  }, [authLoading, user, userAccount, navigate, step]);
+    if (authLoading || !user) return;
+    if (userAccount && userAccount.user_role !== 'borrower') return;
+
+    const userId = user.id;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('borrowers')
+        .select('id')
+        .eq('user_id', userId)
+        .limit(1)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (data) {
+        navigate('/application', { replace: true });
+      } else {
+        setCreatedUserId(userId);
+        setStep('profile');
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [authLoading, user, userAccount, navigate]);
 
   const formatPhone = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 10);
