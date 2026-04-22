@@ -25,7 +25,13 @@ async function plaidRequest(endpoint: string, body: Record<string, unknown>) {
       ...body,
     }),
   })
-  return res.json()
+  const data = await res.json()
+  if (!res.ok || data.error_code) {
+    const msg = data.display_message || data.error_message || data.error_code || `Plaid ${endpoint} HTTP ${res.status}`
+    console.error('Plaid error:', { endpoint, status: res.status, data })
+    throw new Error(msg)
+  }
+  return data
 }
 
 serve(async (req) => {
