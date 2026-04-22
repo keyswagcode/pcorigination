@@ -2,13 +2,13 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7'
 
 const PLAID_CLIENT_ID = Deno.env.get('PLAID_CLIENT_ID') || ''
-const PLAID_SECRET = Deno.env.get('PLAID_SECRET') || ''
 const PLAID_ENV = Deno.env.get('PLAID_ENV') || 'sandbox'
-const PLAID_BASE_URL = PLAID_ENV === 'sandbox'
-  ? 'https://sandbox.plaid.com'
-  : PLAID_ENV === 'development'
-    ? 'https://development.plaid.com'
-    : 'https://production.plaid.com'
+const PLAID_SECRET = PLAID_ENV === 'production'
+  ? (Deno.env.get('PLAID_PRODUCTION_SECRET') || '')
+  : (Deno.env.get('PLAID_SANDBOX_SECRET') || '')
+const PLAID_BASE_URL = PLAID_ENV === 'production'
+  ? 'https://production.plaid.com'
+  : 'https://sandbox.plaid.com'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

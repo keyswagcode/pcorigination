@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { usePlaidLink } from 'react-plaid-link';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { createLinkToken, exchangePublicToken } from '../../services/plaidService';
@@ -51,6 +52,7 @@ export function BorrowerHomePage() {
   const [error, setError] = useState<string | null>(null);
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
   const [llcName, setLlcName] = useState('');
+  const [linkToken, setLinkToken] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -96,37 +98,46 @@ export function BorrowerHomePage() {
   const bridgeMax = confirmedLiquidity * 5;
   const hasPreApproval = preApprovals.length > 0;
 
-  // Plaid Link handler
-  const handlePlaidConnect = async () => {
-    setPlaidLoading(true);
-    setError(null);
-    try {
-      const linkToken = await createLinkToken();
-      // @ts-expect-error Plaid global
-      const handler = window.Plaid.create({
-        token: linkToken,
-        onSuccess: async (publicToken: string) => {
-          try {
-            const result = await exchangePublicToken(publicToken, borrower!.id);
-            setFinancialProfile({
-              liquidity_estimate: result.total_liquidity,
-              confidence_score: 95,
-              summary: { source: 'plaid', accounts: result.accounts },
-            });
-            await generatePreApprovals(result.total_liquidity);
-            await loadData();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to verify accounts');
-          }
-          setPlaidLoading(false);
-        },
-        onExit: () => { setPlaidLoading(false); },
+  // Fetch a Plaid link token once the borrower is loaded
+  useEffect(() => {
+    if (!borrower) return;
+    let cancelled = false;
+    createLinkToken()
+      .then(token => { if (!cancelled) setLinkToken(token); })
+      .catch(err => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to initialize bank link');
       });
-      handler.open();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect to bank');
+    return () => { cancelled = true; };
+  }, [borrower]);
+
+  const { open: openPlaid, ready: plaidReady } = usePlaidLink({
+    token: linkToken,
+    onSuccess: async (publicToken) => {
+      try {
+        const result = await exchangePublicToken(publicToken, borrower!.id);
+        setFinancialProfile({
+          liquidity_estimate: result.total_liquidity,
+          confidence_score: 95,
+          summary: { source: 'plaid', accounts: result.accounts },
+        });
+        await generatePreApprovals(result.total_liquidity);
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to verify accounts');
+      }
       setPlaidLoading(false);
+    },
+    onExit: () => { setPlaidLoading(false); },
+  });
+
+  const handlePlaidConnect = () => {
+    if (!plaidReady || !linkToken) {
+      setError('Bank connection not ready yet — try again in a moment.');
+      return;
     }
+    setError(null);
+    setPlaidLoading(true);
+    openPlaid();
   };
 
   // PDF upload handler
@@ -548,7 +559,7 @@ export function BorrowerHomePage() {
               {/* Plaid Connect */}
               <button
                 onClick={handlePlaidConnect}
-                disabled={plaidLoading}
+                disabled={plaidLoading || !plaidReady}
                 className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-teal-300 rounded-xl hover:border-teal-500 hover:bg-teal-50 transition-all cursor-pointer disabled:opacity-50"
               >
                 {plaidLoading ? (
