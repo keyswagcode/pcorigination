@@ -88,44 +88,44 @@ serve(async (req) => {
       if (borrowerError) throw borrowerError
       if (!borrower) throw new Error('Borrower profile not found. Complete your profile first.')
 
+      const { data: account } = await serviceClient
+        .from('user_accounts')
+        .select('first_name, last_name')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      const name = splitName(borrower.borrower_name, account?.first_name, account?.last_name)
+      const ssnDigits = (borrower.ssn_encrypted || '').replace(/\D/g, '')
+
+      const identity: Record<string, unknown> = { name }
+      if (borrower.date_of_birth) identity.date_of_birth = borrower.date_of_birth
+      if (borrower.email) identity.emails = [{ data: borrower.email, primary: true }]
+      if (borrower.phone) {
+        const phoneDigits = borrower.phone.replace(/\D/g, '')
+        let e164: string | null = null
+        if (phoneDigits.length === 10) e164 = `+1${phoneDigits}`
+        else if (phoneDigits.length === 11 && phoneDigits.startsWith('1')) e164 = `+${phoneDigits}`
+        if (e164) identity.phone_numbers = [{ data: e164, primary: true }]
+      }
+      if (borrower.address_street && borrower.address_city && borrower.address_state && borrower.address_zip) {
+        identity.addresses = [{
+          street_1: borrower.address_street,
+          city: borrower.address_city,
+          region: borrower.address_state,
+          postal_code: borrower.address_zip,
+          country: 'US',
+          primary: true,
+        }]
+      }
+      if (ssnDigits.length === 9) {
+        identity.id_numbers = [{ type: 'us_ssn', value: ssnDigits }]
+      } else if (ssnDigits.length === 4) {
+        identity.id_numbers = [{ type: 'us_ssn_last_4', value: ssnDigits }]
+      }
+
       let plaidUserId = borrower.plaid_user_id
 
       if (!plaidUserId) {
-        const { data: account } = await serviceClient
-          .from('user_accounts')
-          .select('first_name, last_name')
-          .eq('id', user.id)
-          .maybeSingle()
-
-        const name = splitName(borrower.borrower_name, account?.first_name, account?.last_name)
-        const ssnDigits = (borrower.ssn_encrypted || '').replace(/\D/g, '')
-
-        const identity: Record<string, unknown> = { name }
-        if (borrower.date_of_birth) identity.date_of_birth = borrower.date_of_birth
-        if (borrower.email) identity.emails = [{ data: borrower.email, primary: true }]
-        if (borrower.phone) {
-          const phoneDigits = borrower.phone.replace(/\D/g, '')
-          let e164: string | null = null
-          if (phoneDigits.length === 10) e164 = `+1${phoneDigits}`
-          else if (phoneDigits.length === 11 && phoneDigits.startsWith('1')) e164 = `+${phoneDigits}`
-          if (e164) identity.phone_numbers = [{ data: e164, primary: true }]
-        }
-        if (borrower.address_street && borrower.address_city && borrower.address_state && borrower.address_zip) {
-          identity.addresses = [{
-            street_1: borrower.address_street,
-            city: borrower.address_city,
-            region: borrower.address_state,
-            postal_code: borrower.address_zip,
-            country: 'US',
-            primary: true,
-          }]
-        }
-        if (ssnDigits.length === 9) {
-          identity.id_numbers = [{ type: 'us_ssn', value: ssnDigits }]
-        } else if (ssnDigits.length === 4) {
-          identity.id_numbers = [{ type: 'us_ssn_last_4', value: ssnDigits }]
-        }
-
         const userData = await plaidRequest('/user/create', {
           client_user_id: user.id,
           identity,
@@ -136,6 +136,12 @@ serve(async (req) => {
           .from('borrowers')
           .update({ plaid_user_id: plaidUserId })
           .eq('id', borrower.id)
+      } else {
+        // Refresh identity on existing Plaid user in case fields were missing the first time
+        await plaidRequest('/user/update', {
+          user_id: plaidUserId,
+          identity,
+        })
       }
 
       const tokenData = await plaidRequest('/link/token/create', {
