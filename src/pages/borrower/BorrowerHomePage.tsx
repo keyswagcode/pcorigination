@@ -98,17 +98,20 @@ export function BorrowerHomePage() {
   const bridgeMax = confirmedLiquidity * 5;
   const hasPreApproval = preApprovals.length > 0;
 
+  const refreshLinkToken = useCallback(async () => {
+    try {
+      const token = await createLinkToken();
+      setLinkToken(token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to initialize bank link');
+    }
+  }, []);
+
   // Fetch a Plaid link token once the borrower is loaded
   useEffect(() => {
     if (!borrower) return;
-    let cancelled = false;
-    createLinkToken()
-      .then(token => { if (!cancelled) setLinkToken(token); })
-      .catch(err => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to initialize bank link');
-      });
-    return () => { cancelled = true; };
-  }, [borrower]);
+    refreshLinkToken();
+  }, [borrower, refreshLinkToken]);
 
   const [reportPending, setReportPending] = useState(false);
 
@@ -120,6 +123,7 @@ export function BorrowerHomePage() {
       notifyLinkSuccess().catch(err => {
         setError(err instanceof Error ? err.message : 'Failed to start report');
       });
+      refreshLinkToken();
     },
     onExit: () => { setPlaidLoading(false); },
   });
@@ -482,6 +486,7 @@ export function BorrowerHomePage() {
     const fixFlipAmount = liquidity * 10;
     const bridgeAmount = liquidity * 5;
 
+    await supabase.from('pre_approvals').delete().eq('borrower_id', borrower.id);
     await supabase.from('pre_approvals').insert([
       {
         borrower_id: borrower.id,
@@ -600,7 +605,21 @@ export function BorrowerHomePage() {
               </div>
             </div>
             {liquidityVerified && (
-              <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-medium rounded-full">Verified</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePlaidConnect}
+                  disabled={plaidLoading || !plaidReady || reportPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-teal-700 border border-teal-200 rounded-full hover:bg-teal-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {plaidLoading || reportPending ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Plus className="w-3 h-3" />
+                  )}
+                  {reportPending ? 'Updating…' : 'Add More Liquidity'}
+                </button>
+                <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-medium rounded-full">Verified</span>
+              </div>
             )}
           </div>
 
