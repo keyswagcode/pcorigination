@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { generatePreApprovalPdfHtml, downloadPdf } from '../../lib/pdfGenerator';
+import { generatePreApprovalPdfHtml, downloadPdf, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
 
 interface LoanApplication {
   id: string;
@@ -368,7 +368,17 @@ export function LoanApplicationHistory({ onBack, onSelectApplication, onContinue
 
       const letterNumber = `PA-${letterData.id.slice(0, 8).toUpperCase()}`;
 
+      const { data: submissionRow } = await supabase
+        .from('intake_submissions')
+        .select('borrower_id')
+        .eq('id', app.id)
+        .maybeSingle();
+      const branding = submissionRow?.borrower_id
+        ? await fetchOrgBrandingForBorrower(submissionRow.borrower_id)
+        : { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
+
       const htmlContent = generatePreApprovalPdfHtml({
+        ...branding,
         borrowerName: userAccount?.full_name || user.email?.split('@')[0] || 'Borrower',
         borrowerType: letterData.borrowerType,
         loanAmount: letterData.loanAmount,

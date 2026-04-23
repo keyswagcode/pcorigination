@@ -3,7 +3,7 @@ import { Upload, DollarSign, MapPin, Building2, ArrowRight, CheckCircle, XCircle
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../team/TeamContext';
-import { generatePreApprovalPdfHtml, downloadPdf, openPdfPreview } from '../../lib/pdfGenerator';
+import { generatePreApprovalPdfHtml, downloadPdf, openPdfPreview, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
 import { buildLoanPackage } from '../../services/loanPackagingEngine';
 import { runPlacerBot } from '../../services/underwritingPipeline';
 import { getSubmissionState } from '../../services/submissionStateService';
@@ -973,7 +973,7 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
     }
   }, [submissionId, loanAmountNum, purchasePriceNum, propertyAddress, propertyCity, propertyState, propertyZip, loanType, borrowerType, creditScoreNum, estimatedDscr, rawBankAccounts, extractedData, requiredLiquidity]);
 
-  const handleExportPdf = useCallback(() => {
+  const handleExportPdf = useCallback(async () => {
     if (!preApprovalResult || !preApprovalResult.letter_number || preApprovalResult.recommended_amount === null) return;
 
     const borrowerName = borrowerType === 'entity' && entityName
@@ -984,8 +984,12 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
 
     const today = new Date();
     const expiration = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const branding = borrowerId
+      ? await fetchOrgBrandingForBorrower(borrowerId)
+      : { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
 
     const pdfHtml = generatePreApprovalPdfHtml({
+      ...branding,
       borrowerName,
       borrowerType,
       entityName: entityName || undefined,
@@ -1019,9 +1023,9 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
     });
 
     downloadPdf(pdfHtml, `pre-approval-${preApprovalResult.letter_number}.pdf`);
-  }, [preApprovalResult, borrowerType, entityName, userAccount, loanType, propertyAddress, propertyCity, propertyState, propertyZip, purchasePriceNum]);
+  }, [preApprovalResult, borrowerType, entityName, userAccount, loanType, propertyAddress, propertyCity, propertyState, propertyZip, purchasePriceNum, borrowerId]);
 
-  const handlePreviewPdf = useCallback(() => {
+  const handlePreviewPdf = useCallback(async () => {
     if (!preApprovalResult || !preApprovalResult.letter_number || preApprovalResult.recommended_amount === null) return;
 
     const borrowerName = borrowerType === 'entity' && entityName
@@ -1032,8 +1036,12 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
 
     const today = new Date();
     const expiration = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const branding = borrowerId
+      ? await fetchOrgBrandingForBorrower(borrowerId)
+      : { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
 
     const pdfHtml = generatePreApprovalPdfHtml({
+      ...branding,
       borrowerName,
       borrowerType,
       entityName: entityName || undefined,
@@ -1067,7 +1075,7 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
     });
 
     openPdfPreview(pdfHtml);
-  }, [preApprovalResult, borrowerType, entityName, userAccount, loanType, propertyAddress, propertyCity, propertyState, propertyZip, purchasePriceNum]);
+  }, [preApprovalResult, borrowerType, entityName, userAccount, loanType, propertyAddress, propertyCity, propertyState, propertyZip, purchasePriceNum, borrowerId]);
 
   const saveApplicationAsPendingApproval = useCallback(async () => {
     if (!submissionId || !user || applicationSaved || !preApprovalResult) return;

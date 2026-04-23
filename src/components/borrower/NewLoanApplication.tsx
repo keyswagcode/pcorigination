@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ArrowRight, ArrowLeft, Hop as Home, Building2, Upload, FileText, CheckCircle as CheckCircle2, User, DollarSign, Loader as Loader2, AlertCircle, AlertTriangle, Calendar, MapPin, Download, TrendingUp, Shield, Info, X, Save } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { generatePreApprovalPdfHtml, downloadPdf, openPdfPreview } from '../../lib/pdfGenerator';
+import { generatePreApprovalPdfHtml, downloadPdf, openPdfPreview, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
 import { buildLoanPackage } from '../../services/loanPackagingEngine';
 import { runPlacerBot } from '../../services/underwritingPipeline';
 import { getSubmissionState } from '../../services/submissionStateService';
@@ -864,7 +864,7 @@ export function NewLoanApplication({ onComplete, onCancel, existingSubmissionId,
     }
   }, [submissionId, loanAmountNum, purchasePriceNum, propertyAddress, propertyCity, propertyState, propertyZip, loanType, ownershipType, creditScoreNum, estimatedDscr, loanPurpose, extractedData, requiredLiquidity]);
 
-  const handleExportPdf = useCallback(() => {
+  const handleExportPdf = useCallback(async () => {
     if (!preApprovalResult) return;
 
     const borrowerName = ownershipType === 'entity' && entityName
@@ -875,8 +875,12 @@ export function NewLoanApplication({ onComplete, onCancel, existingSubmissionId,
 
     const today = new Date();
     const expiration = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const branding = borrowerId
+      ? await fetchOrgBrandingForBorrower(borrowerId)
+      : { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
 
     const pdfHtml = generatePreApprovalPdfHtml({
+      ...branding,
       borrowerName,
       borrowerType: ownershipType,
       entityName: entityName || undefined,
@@ -910,9 +914,9 @@ export function NewLoanApplication({ onComplete, onCancel, existingSubmissionId,
     });
 
     downloadPdf(pdfHtml, `pre-approval-${preApprovalResult.letter_number}.pdf`);
-  }, [preApprovalResult, ownershipType, entityName, userAccount, loanType, propertyAddress, propertyCity, propertyState, propertyZip, purchasePriceNum]);
+  }, [preApprovalResult, ownershipType, entityName, userAccount, loanType, propertyAddress, propertyCity, propertyState, propertyZip, purchasePriceNum, borrowerId]);
 
-  const handlePreviewPdf = useCallback(() => {
+  const handlePreviewPdf = useCallback(async () => {
     if (!preApprovalResult) return;
 
     const borrowerName = ownershipType === 'entity' && entityName
@@ -923,8 +927,12 @@ export function NewLoanApplication({ onComplete, onCancel, existingSubmissionId,
 
     const today = new Date();
     const expiration = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const branding = borrowerId
+      ? await fetchOrgBrandingForBorrower(borrowerId)
+      : { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
 
     const pdfHtml = generatePreApprovalPdfHtml({
+      ...branding,
       borrowerName,
       borrowerType: ownershipType,
       entityName: entityName || undefined,
@@ -958,7 +966,7 @@ export function NewLoanApplication({ onComplete, onCancel, existingSubmissionId,
     });
 
     openPdfPreview(pdfHtml);
-  }, [preApprovalResult, ownershipType, entityName, userAccount, loanType, propertyAddress, propertyCity, propertyState, propertyZip, purchasePriceNum]);
+  }, [preApprovalResult, ownershipType, entityName, userAccount, loanType, propertyAddress, propertyCity, propertyState, propertyZip, purchasePriceNum, borrowerId]);
 
   const handleSaveApplication = useCallback(async () => {
     if (!submissionId || !user) return;

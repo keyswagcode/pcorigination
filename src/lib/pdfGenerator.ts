@@ -241,6 +241,32 @@ interface PdfOptions {
   dscr?: number | null;
   ltv?: number | null;
   creditScore?: number | null;
+  orgName?: string;
+  orgLogoUrl?: string | null;
+}
+
+export async function fetchOrgBrandingForBorrower(borrowerId: string): Promise<{ orgName: string; orgLogoUrl: string | null }> {
+  const { supabase } = await import('./supabase');
+  const fallback = { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
+
+  const { data: borrower } = await supabase
+    .from('borrowers')
+    .select('broker_id')
+    .eq('id', borrowerId)
+    .maybeSingle();
+  if (!borrower?.broker_id) return fallback;
+
+  const { data: orgMember } = await supabase
+    .from('organization_members')
+    .select('organizations(name, logo_url)')
+    .eq('user_id', borrower.broker_id)
+    .maybeSingle();
+
+  const org = orgMember?.organizations as unknown as { name?: string; logo_url?: string | null } | null;
+  return {
+    orgName: org?.name || fallback.orgName,
+    orgLogoUrl: org?.logo_url || null,
+  };
 }
 
 function fmt(n: number): string {
@@ -611,8 +637,10 @@ export function generatePreApprovalPdfHtml(opts: PdfOptions): string {
 <body>
   <div class="header">
     <div>
-      <div class="logo">ClearLend</div>
-      <div class="logo-sub">Lending Partner Network</div>
+      ${opts.orgLogoUrl
+        ? `<img src="${opts.orgLogoUrl}" alt="${opts.orgName || ''}" style="max-height: 56px; max-width: 220px; object-fit: contain;" />`
+        : `<div class="logo">${opts.orgName || 'Key Real Estate Capital'}</div><div class="logo-sub">Lending Partner</div>`
+      }
     </div>
     <div class="header-right">
       <strong>Letter #${opts.letterNumber}</strong>
@@ -709,15 +737,15 @@ export function generatePreApprovalPdfHtml(opts: PdfOptions): string {
     </p>
     <div class="signature-line">
       <div class="signature-block">
-        <div class="signature-name">ClearLend Underwriting Team</div>
-        <div class="signature-title">Lending Partner Network</div>
+        <div class="signature-name">${opts.orgName || 'Underwriting Team'}</div>
+        <div class="signature-title">Underwriting</div>
       </div>
     </div>
   </div>
 
   <div class="footer">
     <div>This is not a commitment to lend. Rates, terms, and conditions are subject to change without notice.</div>
-    <div>Equal Housing Lender | NMLS #XXXXXX</div>
+    <div>${opts.orgName || 'Equal Housing Lender'} | Equal Housing Lender</div>
     <div style="margin-top: 8px;">
       Document ID: <span class="footer-id">${approvalId}</span> |
       Letter: <span class="footer-id">${opts.letterNumber}</span>

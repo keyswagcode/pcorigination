@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { generatePreApprovalPdfHtml, downloadPdf } from '../../lib/pdfGenerator';
+import { generatePreApprovalPdfHtml, downloadPdf, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
 
 interface LoanApplicationFull {
   id: string;
@@ -499,10 +499,18 @@ export function LoanApplicationDetail({ applicationId, source = 'intake', initia
     return stageMap[stage] ?? 0;
   };
 
-  const handleDownloadPreApprovalLetter = () => {
+  const handleDownloadPreApprovalLetter = async () => {
     if (!application?.pre_approval) return;
 
     const preApproval = application.pre_approval;
+    const { data: submission } = await supabase
+      .from('intake_submissions')
+      .select('borrower_id')
+      .eq('id', applicationId)
+      .maybeSingle();
+    const branding = submission?.borrower_id
+      ? await fetchOrgBrandingForBorrower(submission.borrower_id)
+      : { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
     const issueDate = new Date(preApproval.created_at).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
@@ -521,6 +529,7 @@ export function LoanApplicationDetail({ applicationId, source = 'intake', initia
         });
 
     const htmlContent = generatePreApprovalPdfHtml({
+      ...branding,
       borrowerName: application.borrower?.borrower_name || 'Borrower',
       borrowerType: preApproval.borrower_type as 'individual' | 'entity',
       loanAmount: preApproval.requested_loan_amount || preApproval.recommended_amount,
