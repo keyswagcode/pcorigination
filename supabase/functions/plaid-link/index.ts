@@ -99,7 +99,8 @@ serve(async (req) => {
 
       const identity: Record<string, unknown> = { name }
       if (borrower.date_of_birth) identity.date_of_birth = borrower.date_of_birth
-      if (borrower.email) identity.emails = [{ data: borrower.email, primary: true }]
+      const email = borrower.email || user.email
+      if (email) identity.emails = [{ data: email, primary: true }]
       if (borrower.phone) {
         const phoneDigits = borrower.phone.replace(/\D/g, '')
         let e164: string | null = null
@@ -123,37 +124,54 @@ serve(async (req) => {
         identity.id_numbers = [{ type: 'us_ssn_last_4', value: ssnDigits }]
       }
 
-      let plaidUserId = borrower.plaid_user_id
-
-      if (!plaidUserId) {
-        const userData = await plaidRequest('/user/create', {
-          client_user_id: user.id,
-          identity,
-        })
-        plaidUserId = userData.user_id
-
-        await serviceClient
-          .from('borrowers')
-          .update({ plaid_user_id: plaidUserId })
-          .eq('id', borrower.id)
-      } else {
-        // Refresh identity on existing Plaid user in case fields were missing the first time
-        await plaidRequest('/user/update', {
-          user_id: plaidUserId,
-          identity,
-        })
+      // Redacted diagnostic — never logs raw SSN or full phone
+      const redactedIdentity = {
+        has_name: !!(name.given_name && name.family_name),
+        has_dob: !!identity.date_of_birth,
+        has_email: !!identity.emails,
+        has_phone: !!identity.phone_numbers,
+        has_address: !!identity.addresses,
+        ssn_type: ssnDigits.length === 9 ? 'us_ssn' : ssnDigits.length === 4 ? 'us_ssn_last_4' : 'missing',
+        ssn_length: ssnDigits.length,
       }
+      console.log('Plaid identity built for borrower', borrower.id, redactedIdentity)
 
-      const tokenData = await plaidRequest('/link/token/create', {
-        user_id: plaidUserId,
-        client_name: 'Key Real Estate Capital',
-        products: ['cra_base_report'],
-        consumer_report_permissible_purpose: 'WRITTEN_INSTRUCTION_PREQUALIFICATION',
-        cra_options: { days_requested: 90 },
-        country_codes: ['US'],
-        language: 'en',
-        webhook: PLAID_WEBHOOK_URL,
-      })
+      let plaidUserId = borrower.plaid_user_id
+      let tokenData: Record<string, unknown>
+
+      try {
+        if (!plaidUserId) {
+          const userData = await plaidRequest('/user/create', {
+            client_user_id: user.id,
+            identity,
+          })
+          plaidUserId = userData.user_id
+
+          await serviceClient
+            .from('borrowers')
+            .update({ plaid_user_id: plaidUserId })
+            .eq('id', borrower.id)
+        } else {
+          await plaidRequest('/user/update', {
+            user_id: plaidUserId,
+            identity,
+          })
+        }
+
+        tokenData = await plaidRequest('/link/token/create', {
+          user_id: plaidUserId,
+          client_name: 'Key Real Estate Capital',
+          products: ['cra_base_report'],
+          consumer_report_permissible_purpose: 'WRITTEN_INSTRUCTION_PREQUALIFICATION',
+          cra_options: { days_requested: 90 },
+          country_codes: ['US'],
+          language: 'en',
+          webhook: PLAID_WEBHOOK_URL,
+        })
+      } catch (err) {
+        const baseMsg = (err as Error).message
+        throw new Error(`${baseMsg} | identity_check: ${JSON.stringify(redactedIdentity)}`)
+      }
 
       return new Response(JSON.stringify({ link_token: tokenData.link_token }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
