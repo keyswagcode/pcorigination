@@ -4,7 +4,7 @@ import { usePlaidLink } from 'react-plaid-link';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { createLinkToken, notifyLinkSuccess, getReportStatus } from '../../services/plaidService';
-import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
+import { generatePreApprovalPdf, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
 import {
   Building2, CheckCircle2, DollarSign, Plus, Download,
   Shield, Banknote, FileText, ArrowRight, Loader2, AlertCircle
@@ -423,8 +423,6 @@ export function BorrowerHomePage() {
       let brokerName = 'Your Broker';
       let brokerEmail: string | null = null;
       let brokerPhone: string | null = null;
-      let orgName = '';
-      let orgLogoUrl: string | null = null;
 
       if (borrowerFull?.broker_id) {
         const { data: broker } = await supabase
@@ -437,19 +435,11 @@ export function BorrowerHomePage() {
           brokerEmail = broker.email;
           brokerPhone = broker.phone;
         }
-
-        // Try to get org branding
-        const { data: orgMember } = await supabase
-          .from('organization_members')
-          .select('organizations(name, logo_url)')
-          .eq('user_id', borrowerFull.broker_id)
-          .maybeSingle();
-        if (orgMember?.organizations) {
-          const org = orgMember.organizations as unknown as { name: string; logo_url: string | null };
-          orgName = org.name || '';
-          orgLogoUrl = org.logo_url || null;
-        }
       }
+
+      // Org branding comes from an edge function so RLS on organization_members
+      // doesn't block the borrower from reading their broker's org logo.
+      const { orgName, orgLogoUrl } = await fetchOrgBrandingForBorrower(borrower.id);
 
       const today = new Date();
       const expiry = new Date(today);

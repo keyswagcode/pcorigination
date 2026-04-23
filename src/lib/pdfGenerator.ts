@@ -265,28 +265,34 @@ interface PdfOptions {
   orgLogoUrl?: string | null;
 }
 
-export async function fetchOrgBrandingForBorrower(borrowerId: string): Promise<{ orgName: string; orgLogoUrl: string | null }> {
+export async function fetchOrgBrandingForBorrower(borrowerId?: string): Promise<{ orgName: string; orgLogoUrl: string | null }> {
   const { supabase } = await import('./supabase');
   const fallback = { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
 
-  const { data: borrower } = await supabase
-    .from('borrowers')
-    .select('broker_id')
-    .eq('id', borrowerId)
-    .maybeSingle();
-  if (!borrower?.broker_id) return fallback;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return fallback;
 
-  const { data: orgMember } = await supabase
-    .from('organization_members')
-    .select('organizations(name, logo_url)')
-    .eq('user_id', borrower.broker_id)
-    .maybeSingle();
-
-  const org = orgMember?.organizations as unknown as { name?: string; logo_url?: string | null } | null;
-  return {
-    orgName: org?.name || fallback.orgName,
-    orgLogoUrl: org?.logo_url || null,
-  };
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-branding`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(borrowerId ? { borrower_id: borrowerId } : {}),
+      }
+    );
+    if (!res.ok) return fallback;
+    const data = await res.json();
+    return {
+      orgName: data.orgName || fallback.orgName,
+      orgLogoUrl: data.orgLogoUrl || null,
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 function fmt(n: number): string {
