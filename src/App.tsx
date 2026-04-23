@@ -21,6 +21,7 @@ import { BrokerBorrowerDetailPage } from './pages/broker/BrokerBorrowerDetailPag
 import { BrokerLoanReviewPage } from './pages/broker/BrokerLoanReviewPage';
 import { BrokerSettingsPage } from './pages/broker/BrokerSettingsPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { CoBorrowerInvitePage } from './pages/CoBorrowerInvitePage';
 
 function LoginGuard() {
   const { user, userAccount, isLoading, accountFetched } = useAuth();
@@ -136,6 +137,7 @@ function AppRoutes() {
         <Route path="/login" element={<LoginGuard />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/apply/:posSlug" element={<BorrowerApplyPage />} />
+        <Route path="/co-borrower-invite/:token" element={<CoBorrowerInvitePage />} />
         <Route path="/" element={<RoleBasedRedirect />} />
 
         <Route

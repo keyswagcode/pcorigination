@@ -529,22 +529,36 @@ function CoBorrowerSection({ borrowerId }: { borrowerId: string }) {
     }
   };
 
+  const callInviteFunction = async (payload: Record<string, unknown>) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/co-borrower-invite`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ action: 'send', ...payload }),
+      }
+    );
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to send invite');
+    return data;
+  };
+
   const handleInvite = async () => {
     if (!inviteEmail || !inviteName) return;
     setSaving(true);
     setError(null);
 
     try {
-      const token = crypto.randomUUID();
-      const { error: insertError } = await supabase.from('co_borrowers').insert({
-        borrower_id: borrowerId,
-        borrower_name: inviteName,
-        email: inviteEmail,
-        status: 'invited',
-        invite_token: token,
-        filled_by_self: true,
+      await callInviteFunction({
+        co_borrower_name: inviteName,
+        co_borrower_email: inviteEmail,
       });
-      if (insertError) throw insertError;
 
       setInviteEmail('');
       setInviteName('');
@@ -561,12 +575,11 @@ function CoBorrowerSection({ borrowerId }: { borrowerId: string }) {
     setSaving(true);
     setError(null);
     try {
-      const newToken = crypto.randomUUID();
-      const { error: updateError } = await supabase
-        .from('co_borrowers')
-        .update({ invite_token: newToken, status: 'invited' })
-        .eq('id', cb.id);
-      if (updateError) throw updateError;
+      await callInviteFunction({
+        co_borrower_id: cb.id,
+        co_borrower_name: cb.borrower_name,
+        co_borrower_email: cb.email,
+      });
       await loadCoBorrowers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resend invite');
