@@ -142,7 +142,7 @@ serve(async (req) => {
         user_id: plaidUserId,
         client_name: 'Key Real Estate Capital',
         products: ['cra_base_report'],
-        consumer_report_permissible_purpose: 'CREDIT_PREQUALIFICATION',
+        consumer_report_permissible_purpose: 'WRITTEN_INSTRUCTION_PREQUALIFICATION',
         cra_options: { days_requested: 90 },
         country_codes: ['US'],
         language: 'en',
