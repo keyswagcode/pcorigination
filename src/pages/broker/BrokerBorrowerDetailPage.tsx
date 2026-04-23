@@ -75,6 +75,23 @@ interface ActivityEntry {
   created_at: string;
 }
 
+interface CoBorrower {
+  id: string;
+  borrower_name: string | null;
+  email: string | null;
+  phone: string | null;
+  date_of_birth: string | null;
+  ssn_last4: string | null;
+  credit_score: number | null;
+  address_street: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  address_zip: string | null;
+  status: string;
+  filled_by_self: boolean;
+  created_at: string;
+}
+
 type Tab = 'profile' | 'documents' | 'preapprovals' | 'loans' | 'notes' | 'audit';
 
 const LOAN_TYPE_LABELS: Record<string, string> = { dscr: 'DSCR', fix_flip: 'Fix & Flip', bridge: 'Bridge' };
@@ -88,6 +105,7 @@ export function BrokerBorrowerDetailPage() {
   const { borrowerId } = useParams<{ borrowerId: string }>();
   const { user } = useAuth();
   const [borrower, setBorrower] = useState<Borrower | null>(null);
+  const [coBorrowers, setCoBorrowers] = useState<CoBorrower[]>([]);
   const [documents, setDocuments] = useState<UploadedDoc[]>([]);
   const [preApprovals, setPreApprovals] = useState<PreApproval[]>([]);
   const [loans, setLoans] = useState<LoanScenario[]>([]);
@@ -112,16 +130,18 @@ export function BrokerBorrowerDetailPage() {
   const loadData = useCallback(async () => {
     if (!borrowerId) return;
 
-    const [bRes, dRes, paRes, lRes, nRes, aRes] = await Promise.all([
+    const [bRes, dRes, paRes, lRes, nRes, aRes, cbRes] = await Promise.all([
       supabase.from('borrowers').select('*').eq('id', borrowerId).maybeSingle(),
       supabase.from('uploaded_documents').select('id, document_type, document_subtype, file_name, file_path, processing_status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('pre_approvals').select('id, loan_type, prequalified_amount, status, verified_liquidity').eq('borrower_id', borrowerId),
       supabase.from('loan_scenarios').select('id, scenario_name, loan_type, loan_purpose, loan_amount, ltv, status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('borrower_notes').select('id, content, user_id, created_at, user_accounts(first_name, last_name)').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('borrower_activity_log').select('id, event_type, title, details, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }).limit(50),
+      supabase.from('co_borrowers').select('id, borrower_name, email, phone, date_of_birth, ssn_last4, credit_score, address_street, address_city, address_state, address_zip, status, filled_by_self, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: true }),
     ]);
 
     setBorrower(bRes.data);
+    setCoBorrowers(cbRes.data || []);
     setDocuments(dRes.data || []);
     setPreApprovals(paRes.data || []);
     setLoans(lRes.data || []);
@@ -625,6 +645,65 @@ export function BrokerBorrowerDetailPage() {
               <p className="text-sm text-gray-900">
                 {[borrower.address_street, borrower.address_city, borrower.address_state, borrower.address_zip].filter(Boolean).join(', ') || '—'}
               </p>
+            )}
+          </div>
+
+          {/* Co-Borrowers */}
+          <div className="mt-6 pt-6 border-t border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Co-Borrowers ({coBorrowers.length})</h3>
+            {coBorrowers.length === 0 ? (
+              <p className="text-sm text-gray-500">No co-borrowers added</p>
+            ) : (
+              <div className="space-y-3">
+                {coBorrowers.map(cb => {
+                  const statusColor = cb.status === 'completed'
+                    ? 'bg-teal-100 text-teal-700'
+                    : cb.status === 'invited'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-gray-100 text-gray-700';
+                  const statusLabel = cb.status === 'completed' ? 'Completed' : cb.status === 'invited' ? 'Invited' : cb.status;
+                  const address = [cb.address_street, cb.address_city, cb.address_state, cb.address_zip].filter(Boolean).join(', ');
+                  return (
+                    <div key={cb.id} className="border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{cb.borrower_name || '—'}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {cb.filled_by_self ? 'Completed by co-borrower' : 'Entered by primary borrower'}
+                          </p>
+                        </div>
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColor}`}>{statusLabel}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                        <div>
+                          <div className="text-xs text-gray-500 uppercase">Email</div>
+                          <div className="text-gray-900">{cb.email || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 uppercase">Phone</div>
+                          <div className="text-gray-900">{cb.phone || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 uppercase">Date of Birth</div>
+                          <div className="text-gray-900">{cb.date_of_birth || '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 uppercase">Credit Score</div>
+                          <div className="text-gray-900">{cb.credit_score ?? '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 uppercase">SSN (last 4)</div>
+                          <div className="text-gray-900">{cb.ssn_last4 ? `•••-••-${cb.ssn_last4}` : '—'}</div>
+                        </div>
+                        <div className="col-span-2">
+                          <div className="text-xs text-gray-500 uppercase">Address</div>
+                          <div className="text-gray-900">{address || '—'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
