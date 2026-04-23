@@ -13,18 +13,32 @@ interface DocCategory {
   icon: typeof FileText;
   accept: string;
   condition: 'always' | 'entity' | 'fix_flip' | 'dscr';
+  template?: { filename: string; headers: string[]; example: string[] };
 }
 
 const DOC_CATEGORIES: DocCategory[] = [
   { key: 'drivers_license', label: "Driver's License / Passport", description: 'Government-issued photo ID', icon: User, accept: '.pdf,.jpg,.jpeg,.png', condition: 'always' },
   { key: 'voided_check', label: 'Voided Check', description: 'For payment verification', icon: Receipt, accept: '.pdf,.jpg,.jpeg,.png', condition: 'always' },
   { key: 'property_insurance', label: 'Property Insurance', description: 'Proof of insurance coverage', icon: Shield, accept: '.pdf', condition: 'always' },
+  { key: 'scope_of_work', label: 'Scope of Work', description: 'Detailed scope of work for the project', icon: Hammer, accept: '.pdf,.xlsx,.xls,.csv,.doc,.docx', condition: 'always' },
+  {
+    key: 'real_estate_experience',
+    label: 'Real Estate Experience',
+    description: 'Track record of prior real estate deals',
+    icon: Building2,
+    accept: '.xlsx,.xls,.csv',
+    condition: 'always',
+    template: {
+      filename: 'real-estate-experience-template.csv',
+      headers: ['Address', 'Date Purchased', 'Reno Amount', 'After-Repair Value', 'Sale Date/Refinance Date', 'Property Type'],
+      example: ['123 Main St San Diego CA', '2024-03-10', '75000', '550000', '2024-09-20', 'Single Family'],
+    },
+  },
   { key: 'lease', label: 'Lease', description: 'Current lease agreement for rental property', icon: FileText, accept: '.pdf', condition: 'dscr' },
   { key: 'articles_of_incorporation', label: 'Articles of Incorporation', description: 'LLC or corporation formation docs', icon: Building2, accept: '.pdf', condition: 'always' },
   { key: 'ein_letter', label: 'EIN Letter', description: 'IRS Employer Identification Number letter', icon: Building2, accept: '.pdf', condition: 'always' },
   { key: 'operating_agreement', label: 'Operating Agreement', description: 'LLC operating agreement', icon: Building2, accept: '.pdf', condition: 'always' },
   { key: 'rehab_budget', label: 'Rehab Budget', description: 'Detailed renovation/rehab budget', icon: Hammer, accept: '.pdf,.xlsx,.xls,.csv', condition: 'fix_flip' },
-  { key: 'flip_experience', label: 'Flip Experience Sheet', description: 'Track record of flips in the last 2 years', icon: Hammer, accept: '.xlsx,.xls,.csv', condition: 'fix_flip' },
 ];
 
 interface UploadedDoc {
@@ -143,15 +157,14 @@ export function BorrowerDocumentsPage() {
     }
   };
 
-  const downloadTemplate = () => {
-    const headers = 'Property Address,Purchase Price,Rehab Cost,Sale Price,Profit,Date Completed';
-    const example = '123 Main St San Diego CA,250000,75000,400000,75000,2025-06-15';
-    const csv = `${headers}\n${example}\n`;
+  const downloadTemplate = (template: NonNullable<DocCategory['template']>) => {
+    const escape = (v: string) => /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    const csv = `${template.headers.map(escape).join(',')}\n${template.example.map(escape).join(',')}\n`;
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'flip-experience-template.csv';
+    a.download = template.filename;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -234,9 +247,9 @@ export function BorrowerDocumentsPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {cat.key === 'flip_experience' && (
+                    {cat.template && (
                       <button
-                        onClick={downloadTemplate}
+                        onClick={() => downloadTemplate(cat.template!)}
                         className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
                       >
                         <Download className="w-3.5 h-3.5" />
