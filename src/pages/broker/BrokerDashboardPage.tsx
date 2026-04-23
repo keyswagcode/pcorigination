@@ -194,6 +194,11 @@ export function BrokerDashboardPage() {
 
   const pipelineCounts = getPipelineCounts();
 
+  const pendingLoanCountByBorrower = pendingLoans.reduce<Record<string, number>>((acc, l) => {
+    acc[l.borrower_id] = (acc[l.borrower_id] || 0) + 1;
+    return acc;
+  }, {});
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -288,9 +293,17 @@ export function BrokerDashboardPage() {
                           : 'bg-gray-50 hover:bg-teal-50 hover:shadow-sm'
                       }`}
                     >
-                      <Link to={`/internal/my-borrowers/${b.id}`} className="block" onClick={e => { if (dragBorrowerId) e.preventDefault(); }}>
-                        <p className="text-sm font-medium text-gray-900 truncate">{b.borrower_name}</p>
+                      <Link to={`/internal/my-borrowers/${b.id}`} className="block relative" onClick={e => { if (dragBorrowerId) e.preventDefault(); }}>
+                        <p className="text-sm font-medium text-gray-900 truncate pr-6">{b.borrower_name}</p>
                         <p className="text-xs text-gray-500 mt-0.5">{b.credit_score ? `${b.credit_score} CS` : 'No CS'}</p>
+                        {pendingLoanCountByBorrower[b.id] > 0 && (
+                          <span
+                            title={`${pendingLoanCountByBorrower[b.id]} pending loan${pendingLoanCountByBorrower[b.id] === 1 ? '' : 's'}`}
+                            className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center"
+                          >
+                            {pendingLoanCountByBorrower[b.id]}
+                          </span>
+                        )}
                       </Link>
                     </div>
                   ))}
@@ -343,9 +356,19 @@ export function BrokerDashboardPage() {
                     <p className="text-sm font-medium text-gray-900">{b.borrower_name}</p>
                     <p className="text-xs text-gray-500">{b.email}</p>
                   </div>
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${STAGE_COLORS[b.lifecycle_stage || ''] || 'bg-gray-100 text-gray-600'}`}>
-                    {STAGE_LABELS[b.lifecycle_stage || ''] || 'New'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {pendingLoanCountByBorrower[b.id] > 0 && (
+                      <span
+                        title={`${pendingLoanCountByBorrower[b.id]} pending loan${pendingLoanCountByBorrower[b.id] === 1 ? '' : 's'}`}
+                        className="min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center"
+                      >
+                        {pendingLoanCountByBorrower[b.id]}
+                      </span>
+                    )}
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${STAGE_COLORS[b.lifecycle_stage || ''] || 'bg-gray-100 text-gray-600'}`}>
+                      {STAGE_LABELS[b.lifecycle_stage || ''] || 'New'}
+                    </span>
+                  </div>
                 </Link>
               ))}
               {loanResults.map(l => (
@@ -390,6 +413,14 @@ export function BrokerDashboardPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    {pendingLoanCountByBorrower[b.id] > 0 && (
+                      <span
+                        title={`${pendingLoanCountByBorrower[b.id]} pending loan${pendingLoanCountByBorrower[b.id] === 1 ? '' : 's'}`}
+                        className="min-w-[20px] h-5 px-1.5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center"
+                      >
+                        {pendingLoanCountByBorrower[b.id]}
+                      </span>
+                    )}
                     <span className="text-xs text-gray-400">{new Date(b.created_at).toLocaleDateString()}</span>
                     <ArrowRight className="w-4 h-4 text-gray-400" />
                   </div>
