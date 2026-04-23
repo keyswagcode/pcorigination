@@ -49,7 +49,7 @@ const STAGE_COLORS: Record<string, string> = {
 };
 
 export function BrokerBorrowersPage() {
-  const { user } = useAuth();
+  const { user, userAccount } = useAuth();
   const { member, members } = useTeam();
   const [borrowers, setBorrowers] = useState<BorrowerRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -79,18 +79,28 @@ export function BrokerBorrowersPage() {
   const [csvError, setCsvError] = useState<string | null>(null);
 
   async function loadData() {
-    if (!user || !member) return;
-    const visibleBrokerIds = getVisibleBrokerIds(member, members);
-    const { data } = await supabase
+    if (!user) return;
+    const isAdminLike = userAccount?.user_role === 'admin'
+      || member?.role === 'admin'
+      || member?.role === 'owner';
+
+    let query = supabase
       .from('borrowers')
       .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at, updated_at')
-      .in('broker_id', visibleBrokerIds)
       .order('created_at', { ascending: false });
+
+    if (!isAdminLike) {
+      if (!member) return;
+      const visibleBrokerIds = getVisibleBrokerIds(member, members);
+      query = query.in('broker_id', visibleBrokerIds);
+    }
+
+    const { data } = await query;
     setBorrowers(data || []);
     setIsLoading(false);
   }
 
-  useEffect(() => { loadData(); }, [user, member, members]);
+  useEffect(() => { loadData(); }, [user, userAccount, member, members]);
 
   const handleAddBorrower = async () => {
     if (!user || !addName) return;

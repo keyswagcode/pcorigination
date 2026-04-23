@@ -88,17 +88,24 @@ export function BrokerDashboardPage() {
 
   useEffect(() => {
     async function loadData() {
-      if (!user || !member) return;
+      if (!user) return;
 
-      // Build list of broker_ids this user can see based on role
-      const visibleBrokerIds = getVisibleBrokerIds(member, members);
+      const isAdminLike = userAccount?.user_role === 'admin'
+        || member?.role === 'admin'
+        || member?.role === 'owner';
 
-      // Fetch borrowers scoped by role hierarchy
-      const { data: borrowerData } = await supabase
+      let borrowersQuery = supabase
         .from('borrowers')
         .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at')
-        .in('broker_id', visibleBrokerIds)
         .order('created_at', { ascending: false });
+
+      if (!isAdminLike) {
+        if (!member) return;
+        const visibleBrokerIds = getVisibleBrokerIds(member, members);
+        borrowersQuery = borrowersQuery.in('broker_id', visibleBrokerIds);
+      }
+
+      const { data: borrowerData } = await borrowersQuery;
       setBorrowers(borrowerData || []);
 
       // Fetch pending loans
@@ -123,7 +130,7 @@ export function BrokerDashboardPage() {
       setIsLoading(false);
     }
     loadData();
-  }, [user, member, members]);
+  }, [user, userAccount, member, members]);
 
   const handleDrop = async (borrowerId: string, newStage: string) => {
     setDragBorrowerId(null);
