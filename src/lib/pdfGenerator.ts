@@ -30,15 +30,31 @@ const LOAN_TYPE_DISPLAY: Record<string, string> = {
   bridge: 'Bridge Loan',
 };
 
-async function loadImageAsBase64(url: string): Promise<string | null> {
+async function loadImage(url: string): Promise<{ data: string; format: string; width: number; height: number } | null> {
   try {
     const res = await fetch(url);
+    if (!res.ok) return null;
     const blob = await res.blob();
-    return new Promise((resolve) => {
+    const type = blob.type.toLowerCase();
+    let format = 'PNG';
+    if (type.includes('jpeg') || type.includes('jpg')) format = 'JPEG';
+    else if (type.includes('webp')) format = 'WEBP';
+    else if (type.includes('png')) format = 'PNG';
+    else if (type.includes('svg')) return null; // jsPDF can't render SVG directly
+
+    const data = await new Promise<string | null>((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = () => resolve(null);
       reader.readAsDataURL(blob);
+    });
+    if (!data) return null;
+
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ data, format, width: img.width, height: img.height });
+      img.onerror = () => resolve(null);
+      img.src = data;
     });
   } catch {
     return null;
@@ -59,28 +75,32 @@ export async function generatePreApprovalPdf(opts: PreApprovalPdfOptions): Promi
   const valueCol = margin + 160;
 
   // --- COMPANY LOGO ---
-  if (opts.orgLogoUrl) {
-    const logoBase64 = await loadImageAsBase64(opts.orgLogoUrl);
-    if (logoBase64) {
-      try {
-        doc.addImage(logoBase64, 'PNG', margin, y, 180, 60);
-        y += 75;
-      } catch {
-        // Skip logo, use text fallback
-        doc.setFontSize(20);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(30, 30, 46);
-        doc.text(opts.orgName, margin, y + 20);
-        y += 40;
-      }
-    }
-  } else {
+  const renderOrgTextHeader = () => {
     doc.setFontSize(20);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 30, 46);
     doc.text(opts.orgName || 'Pre-Approval Letter', margin, y + 20);
     y += 40;
+  };
+
+  let renderedLogo = false;
+  if (opts.orgLogoUrl) {
+    const logo = await loadImage(opts.orgLogoUrl);
+    if (logo) {
+      const maxW = 200, maxH = 60;
+      const scale = Math.min(maxW / logo.width, maxH / logo.height, 1);
+      const w = logo.width * scale;
+      const h = logo.height * scale;
+      try {
+        doc.addImage(logo.data, logo.format, margin, y, w, h);
+        y += h + 15;
+        renderedLogo = true;
+      } catch (err) {
+        console.warn('Failed to embed logo in PDF', err);
+      }
+    }
   }
+  if (!renderedLogo) renderOrgTextHeader();
 
   // --- RE: LINE ---
   y += 10;
