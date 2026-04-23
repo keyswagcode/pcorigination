@@ -29,7 +29,7 @@ function canInviteMembers(currentRole: string): boolean {
 }
 
 export function BrokerSettingsPage() {
-  const { user, userAccount } = useAuth();
+  const { user, userAccount, refreshUserAccount } = useAuth();
   const [posSlug, setPosSlug] = useState('');
   const [originalSlug, setOriginalSlug] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
@@ -254,6 +254,7 @@ export function BrokerSettingsPage() {
 
     await supabase.from('user_accounts').update({ pos_slug: posSlug }).eq('id', user!.id);
     setOriginalSlug(posSlug);
+    await refreshUserAccount();
     setSuccess('POS link updated successfully');
     setTimeout(() => setSuccess(null), 3000);
     setSaving(false);

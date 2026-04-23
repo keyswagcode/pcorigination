@@ -19,6 +19,7 @@ interface AuthContextValue {
   isLoading: boolean;
   accountFetched: boolean;
   signOut: () => Promise<void>;
+  refreshUserAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -28,6 +29,7 @@ const AuthContext = createContext<AuthContextValue>({
   isLoading: true,
   accountFetched: false,
   signOut: async () => {},
+  refreshUserAccount: async () => {},
 });
 
 async function fetchUserAccount(authUserId: string): Promise<UserAccount | null> {
@@ -125,8 +127,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  const refreshUserAccount = async () => {
+    const uid = currentUserIdRef.current;
+    if (!uid) return;
+    const account = await fetchUserAccount(uid);
+    setUserAccount(account);
+  };
+
   return (
-    <AuthContext.Provider value={{ session, user, userAccount, isLoading, accountFetched, signOut }}>
+    <AuthContext.Provider value={{ session, user, userAccount, isLoading, accountFetched, signOut, refreshUserAccount }}>
       {children}
     </AuthContext.Provider>
   );
