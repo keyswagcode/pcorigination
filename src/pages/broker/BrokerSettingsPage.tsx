@@ -185,6 +185,10 @@ export function BrokerSettingsPage() {
     setEditMemberRole(member.role || 'ae');
   };
 
+  const userRoleForBrokerRole = (brokerRole: string): 'admin' | 'broker' => {
+    return brokerRole === 'admin' || brokerRole === 'owner' ? 'admin' : 'broker';
+  };
+
   const handleSaveMember = async (memberId: string, userId: string) => {
     await supabase.from('organization_members').update({
       display_name: editMemberName,
@@ -196,6 +200,7 @@ export function BrokerSettingsPage() {
       last_name: editMemberName.split(' ').slice(1).join(' ') || '',
       email: editMemberEmail,
       broker_role: editMemberRole,
+      user_role: userRoleForBrokerRole(editMemberRole),
     }).eq('id', userId);
     setEditingMemberId(null);
     await loadTeamMembers();
@@ -203,7 +208,10 @@ export function BrokerSettingsPage() {
 
   const handleChangeRole = async (memberId: string, userId: string, newRole: string) => {
     await supabase.from('organization_members').update({ role: newRole }).eq('id', memberId);
-    await supabase.from('user_accounts').update({ broker_role: newRole }).eq('id', userId);
+    await supabase.from('user_accounts').update({
+      broker_role: newRole,
+      user_role: userRoleForBrokerRole(newRole),
+    }).eq('id', userId);
     await loadTeamMembers();
   };
 
