@@ -105,7 +105,10 @@ serve(async (req) => {
         if (borrower.email) identity.emails = [{ data: borrower.email, primary: true }]
         if (borrower.phone) {
           const phoneDigits = borrower.phone.replace(/\D/g, '')
-          identity.phone_numbers = [{ data: `+1${phoneDigits}`, primary: true }]
+          let e164: string | null = null
+          if (phoneDigits.length === 10) e164 = `+1${phoneDigits}`
+          else if (phoneDigits.length === 11 && phoneDigits.startsWith('1')) e164 = `+${phoneDigits}`
+          if (e164) identity.phone_numbers = [{ data: e164, primary: true }]
         }
         if (borrower.address_street && borrower.address_city && borrower.address_state && borrower.address_zip) {
           identity.addresses = [{
