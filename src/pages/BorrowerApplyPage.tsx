@@ -72,6 +72,7 @@ export function BorrowerApplyPage() {
     if (userAccount && userAccount.user_role !== 'borrower') return;
 
     const userId = user.id;
+    const userEmail = user.email || '';
     let cancelled = false;
     (async () => {
       const { data } = await supabase
@@ -87,6 +88,9 @@ export function BorrowerApplyPage() {
         navigate('/application', { replace: true });
       } else {
         setCreatedUserId(userId);
+        // Seed email from the authenticated user so the profile insert uses
+        // the account email even when the borrower skipped the credentials form
+        if (userEmail) setEmail(prev => prev || userEmail);
         setStep('profile');
       }
     })();
