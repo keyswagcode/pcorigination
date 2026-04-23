@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   ArrowLeft, User, FileText, DollarSign, Briefcase, MessageSquare,
-  Upload, CheckCircle2, Loader2, Send, Trash2, Download, Eye,
+  Upload, CheckCircle2, Loader2, Send, Trash2, Download, Eye, EyeOff,
   Edit3, Save, X, Plus, Mail, Phone, ExternalLink
 } from 'lucide-react';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
@@ -27,6 +27,8 @@ interface Borrower {
   address_city: string | null;
   address_state: string | null;
   address_zip: string | null;
+  ssn_encrypted: string | null;
+  ssn_last4: string | null;
   created_at: string;
 }
 
@@ -82,6 +84,7 @@ interface CoBorrower {
   phone: string | null;
   date_of_birth: string | null;
   ssn_last4: string | null;
+  ssn_encrypted: string | null;
   credit_score: number | null;
   address_street: string | null;
   address_city: string | null;
@@ -126,6 +129,22 @@ export function BrokerBorrowerDetailPage() {
   const [showGeneratePA, setShowGeneratePA] = useState(false);
   const [paLiquidity, setPaLiquidity] = useState('');
   const [generatingPA, setGeneratingPA] = useState(false);
+  const [revealedSSNs, setRevealedSSNs] = useState<Set<string>>(new Set());
+
+  const toggleSSN = (id: string) => {
+    setRevealedSSNs(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const formatSSN = (raw: string | null, last4: string | null, revealed: boolean) => {
+    if (!revealed) return last4 ? `•••-••-${last4}` : '—';
+    const digits = (raw || '').replace(/\D/g, '');
+    if (digits.length !== 9) return '—';
+    return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+  };
 
   const loadData = useCallback(async () => {
     if (!borrowerId) return;
@@ -137,7 +156,7 @@ export function BrokerBorrowerDetailPage() {
       supabase.from('loan_scenarios').select('id, scenario_name, loan_type, loan_purpose, loan_amount, ltv, status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('borrower_notes').select('id, content, user_id, created_at, user_accounts(first_name, last_name)').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('borrower_activity_log').select('id, event_type, title, details, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }).limit(50),
-      supabase.from('co_borrowers').select('id, borrower_name, email, phone, date_of_birth, ssn_last4, credit_score, address_street, address_city, address_state, address_zip, status, filled_by_self, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: true }),
+      supabase.from('co_borrowers').select('id, borrower_name, email, phone, date_of_birth, ssn_last4, ssn_encrypted, credit_score, address_street, address_city, address_state, address_zip, status, filled_by_self, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: true }),
     ]);
 
     setBorrower(bRes.data);
@@ -648,6 +667,25 @@ export function BrokerBorrowerDetailPage() {
             )}
           </div>
 
+          {/* SSN */}
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <label className="text-xs font-medium text-gray-500 uppercase mb-1 block">SSN</label>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-gray-900 font-mono">
+                {formatSSN(borrower.ssn_encrypted, borrower.ssn_last4, revealedSSNs.has(borrower.id))}
+              </p>
+              {borrower.ssn_encrypted && (
+                <button
+                  onClick={() => toggleSSN(borrower.id)}
+                  className="p-1 text-gray-400 hover:text-teal-600 transition-colors"
+                  title={revealedSSNs.has(borrower.id) ? 'Hide SSN' : 'Show SSN'}
+                >
+                  {revealedSSNs.has(borrower.id) ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Co-Borrowers */}
           <div className="mt-6 pt-6 border-t border-gray-100">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Co-Borrowers ({coBorrowers.length})</h3>
@@ -692,8 +730,21 @@ export function BrokerBorrowerDetailPage() {
                           <div className="text-gray-900">{cb.credit_score ?? '—'}</div>
                         </div>
                         <div>
-                          <div className="text-xs text-gray-500 uppercase">SSN (last 4)</div>
-                          <div className="text-gray-900">{cb.ssn_last4 ? `•••-••-${cb.ssn_last4}` : '—'}</div>
+                          <div className="text-xs text-gray-500 uppercase">SSN</div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-900 font-mono">
+                              {formatSSN(cb.ssn_encrypted, cb.ssn_last4, revealedSSNs.has(cb.id))}
+                            </span>
+                            {cb.ssn_encrypted && (
+                              <button
+                                onClick={() => toggleSSN(cb.id)}
+                                className="p-1 text-gray-400 hover:text-teal-600 transition-colors"
+                                title={revealedSSNs.has(cb.id) ? 'Hide SSN' : 'Show SSN'}
+                              >
+                                {revealedSSNs.has(cb.id) ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="col-span-2">
                           <div className="text-xs text-gray-500 uppercase">Address</div>
