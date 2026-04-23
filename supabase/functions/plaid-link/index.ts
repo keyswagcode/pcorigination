@@ -10,6 +10,9 @@ const PLAID_BASE_URL = PLAID_ENV === 'production'
   ? 'https://production.plaid.com'
   : 'https://sandbox.plaid.com'
 
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
+const PLAID_WEBHOOK_URL = `${SUPABASE_URL}/functions/v1/plaid-webhook`
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -34,19 +37,30 @@ async function plaidRequest(endpoint: string, body: Record<string, unknown>) {
   return data
 }
 
+function splitName(borrowerName: string | null, fallbackFirst?: string | null, fallbackLast?: string | null) {
+  if (fallbackFirst || fallbackLast) {
+    return { given_name: fallbackFirst || '', family_name: fallbackLast || '' }
+  }
+  const parts = (borrowerName || '').trim().split(/\s+/)
+  return {
+    given_name: parts[0] || '',
+    family_name: parts.slice(1).join(' ') || '',
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
+    const authClient = createClient(
+      SUPABASE_URL,
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
     )
 
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
+    const { data: { user }, error: authError } = await authClient.auth.getUser()
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -54,89 +68,115 @@ serve(async (req) => {
       })
     }
 
-    const { action, ...params } = await req.json()
+    const serviceClient = createClient(
+      SUPABASE_URL,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
 
-    // CREATE LINK TOKEN - for initializing Plaid Link in the frontend
+    const { action } = await req.json()
+
+    // CREATE LINK TOKEN (also creates a Plaid user if one doesn't exist yet)
     if (action === 'create_link_token') {
-      const data = await plaidRequest('/link/token/create', {
-        user: { client_user_id: user.id },
-        client_name: 'PC Origination',
-        products: ['auth', 'transactions'],
+      const { data: borrower, error: borrowerError } = await serviceClient
+        .from('borrowers')
+        .select('id, borrower_name, email, phone, date_of_birth, ssn_encrypted, address_street, address_city, address_state, address_zip, plaid_user_id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (borrowerError) throw borrowerError
+      if (!borrower) throw new Error('Borrower profile not found. Complete your profile first.')
+
+      let plaidUserId = borrower.plaid_user_id
+
+      if (!plaidUserId) {
+        const { data: account } = await serviceClient
+          .from('user_accounts')
+          .select('first_name, last_name')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        const name = splitName(borrower.borrower_name, account?.first_name, account?.last_name)
+        const ssnDigits = (borrower.ssn_encrypted || '').replace(/\D/g, '')
+
+        const identity: Record<string, unknown> = { name }
+        if (borrower.date_of_birth) identity.date_of_birth = borrower.date_of_birth
+        if (borrower.email) identity.emails = [{ data: borrower.email, primary: true }]
+        if (borrower.phone) {
+          const phoneDigits = borrower.phone.replace(/\D/g, '')
+          identity.phone_numbers = [{ data: `+1${phoneDigits}`, primary: true }]
+        }
+        if (borrower.address_street && borrower.address_city && borrower.address_state && borrower.address_zip) {
+          identity.addresses = [{
+            street_1: borrower.address_street,
+            city: borrower.address_city,
+            region: borrower.address_state,
+            postal_code: borrower.address_zip,
+            country: 'US',
+            primary: true,
+          }]
+        }
+        if (ssnDigits.length === 9) {
+          identity.id_numbers = [{ type: 'us_ssn', value: ssnDigits }]
+        } else if (ssnDigits.length === 4) {
+          identity.id_numbers = [{ type: 'us_ssn_last_4', value: ssnDigits }]
+        }
+
+        const userData = await plaidRequest('/user/create', {
+          client_user_id: user.id,
+          identity,
+        })
+        plaidUserId = userData.user_id
+
+        await serviceClient
+          .from('borrowers')
+          .update({ plaid_user_id: plaidUserId })
+          .eq('id', borrower.id)
+      }
+
+      const tokenData = await plaidRequest('/link/token/create', {
+        user: { user_id: plaidUserId },
+        client_name: 'Key Real Estate Capital',
+        products: ['cra_base_report'],
+        consumer_report_permissible_purpose: 'CREDIT_PREQUALIFICATION',
+        cra_options: { days_requested: 90 },
         country_codes: ['US'],
         language: 'en',
+        webhook: PLAID_WEBHOOK_URL,
       })
 
-      return new Response(JSON.stringify({ link_token: data.link_token }), {
+      return new Response(JSON.stringify({ link_token: tokenData.link_token }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    // EXCHANGE PUBLIC TOKEN - after user completes Plaid Link
-    if (action === 'exchange_token') {
-      const { public_token, borrower_id } = params
+    // LINK SUCCESS — borrower completed Plaid Link; report generation begins async.
+    // No public_token exchange is needed for Plaid Check products.
+    if (action === 'link_success') {
+      const { error: updateError } = await serviceClient
+        .from('borrowers')
+        .update({
+          plaid_report_status: 'pending',
+          lifecycle_stage: 'liquidity_pending',
+        })
+        .eq('user_id', user.id)
 
-      // Exchange for access token
-      const exchangeData = await plaidRequest('/item/public_token/exchange', {
-        public_token,
+      if (updateError) throw updateError
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
+    }
 
-      const accessToken = exchangeData.access_token
-
-      // Get account balances
-      const balanceData = await plaidRequest('/accounts/balance/get', {
-        access_token: accessToken,
-      })
-
-      // Calculate total liquidity from all accounts
-      let totalLiquidity = 0
-      const accountSummaries: Array<{
-        name: string
-        type: string
-        balance: number
-        institution: string
-      }> = []
-
-      for (const account of balanceData.accounts || []) {
-        const balance = account.balances?.current || account.balances?.available || 0
-        // Only count depository accounts (checking, savings)
-        if (account.type === 'depository') {
-          totalLiquidity += balance
-          accountSummaries.push({
-            name: account.name,
-            type: account.subtype || account.type,
-            balance,
-            institution: balanceData.item?.institution_id || 'Unknown',
-          })
-        }
-      }
-
-      // Store verified liquidity in borrower_financial_profiles
-      const serviceClient = createClient(
-        Deno.env.get('SUPABASE_URL') ?? '',
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-      )
-
-      await serviceClient.from('borrower_financial_profiles').upsert({
-        borrower_id,
-        liquidity_estimate: totalLiquidity,
-        ending_balance_avg: totalLiquidity,
-        confidence_score: 95, // High confidence from Plaid
-        summary: {
-          source: 'plaid',
-          accounts: accountSummaries,
-          verified_at: new Date().toISOString(),
-          total_liquidity: totalLiquidity,
-        },
-      }, { onConflict: 'borrower_id' })
-
-      // Update borrower lifecycle stage
-      await serviceClient.from('borrowers')
-        .update({ lifecycle_stage: 'liquidity_verified' })
-        .eq('id', borrower_id)
+    // Polling endpoint so the borrower UI can check report status
+    if (action === 'get_report_status') {
+      const { data: borrower } = await serviceClient
+        .from('borrowers')
+        .select('plaid_report_status')
+        .eq('user_id', user.id)
+        .maybeSingle()
 
       return new Response(JSON.stringify({
-        total_liquidity: totalLiquidity,
-        accounts: accountSummaries,
+        status: borrower?.plaid_report_status || null,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })

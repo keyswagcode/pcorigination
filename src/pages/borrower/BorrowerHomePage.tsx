@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { usePlaidLink } from 'react-plaid-link';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { createLinkToken, exchangePublicToken } from '../../services/plaidService';
+import { createLinkToken, notifyLinkSuccess, getReportStatus } from '../../services/plaidService';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
 import {
   Building2, CheckCircle2, DollarSign, Plus, Download,
@@ -110,25 +110,53 @@ export function BorrowerHomePage() {
     return () => { cancelled = true; };
   }, [borrower]);
 
+  const [reportPending, setReportPending] = useState(false);
+
   const { open: openPlaid, ready: plaidReady } = usePlaidLink({
     token: linkToken,
-    onSuccess: async (publicToken) => {
+    onSuccess: async () => {
       try {
-        const result = await exchangePublicToken(publicToken, borrower!.id);
-        setFinancialProfile({
-          liquidity_estimate: result.total_liquidity,
-          confidence_score: 95,
-          summary: { source: 'plaid', accounts: result.accounts },
-        });
-        await generatePreApprovals(result.total_liquidity);
-        await loadData();
+        await notifyLinkSuccess();
+        setReportPending(true);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to verify accounts');
+        setError(err instanceof Error ? err.message : 'Failed to start report');
       }
       setPlaidLoading(false);
     },
     onExit: () => { setPlaidLoading(false); },
   });
+
+  // Poll for Plaid Check report readiness while pending
+  useEffect(() => {
+    if (!reportPending) return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const status = await getReportStatus();
+        if (cancelled) return;
+        if (status === 'ready') {
+          clearInterval(interval);
+          setReportPending(false);
+          const { data: profile } = await supabase
+            .from('borrower_financial_profiles')
+            .select('liquidity_estimate')
+            .eq('borrower_id', borrower!.id)
+            .maybeSingle();
+          if (profile?.liquidity_estimate) {
+            await generatePreApprovals(profile.liquidity_estimate);
+          }
+          await loadData();
+        } else if (status === 'error') {
+          clearInterval(interval);
+          setReportPending(false);
+          setError('Bank report failed to generate. Please try reconnecting.');
+        }
+      } catch {
+        // Ignore transient polling errors
+      }
+    }, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [reportPending, borrower, loadData]);
 
   const handlePlaidConnect = () => {
     if (!plaidReady || !linkToken) {
@@ -559,19 +587,27 @@ export function BorrowerHomePage() {
               {/* Plaid Connect */}
               <button
                 onClick={handlePlaidConnect}
-                disabled={plaidLoading || !plaidReady}
+                disabled={plaidLoading || !plaidReady || reportPending}
                 className="flex flex-col items-center gap-3 p-6 border-2 border-dashed border-teal-300 rounded-xl hover:border-teal-500 hover:bg-teal-50 transition-all cursor-pointer disabled:opacity-50"
               >
-                {plaidLoading ? (
+                {plaidLoading || reportPending ? (
                   <Loader2 className="w-8 h-8 text-teal-600 animate-spin" />
                 ) : (
                   <Shield className="w-8 h-8 text-teal-600" />
                 )}
                 <div className="text-center">
-                  <p className="font-medium text-gray-900">Connect Bank Account</p>
-                  <p className="text-xs text-gray-500 mt-1">Instant verification via Plaid</p>
+                  <p className="font-medium text-gray-900">
+                    {reportPending ? 'Generating Report…' : 'Connect Bank Account'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {reportPending
+                      ? 'This usually takes under a minute'
+                      : 'Instant verification via Plaid'}
+                  </p>
                 </div>
-                <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-medium rounded-full">Recommended</span>
+                {!reportPending && (
+                  <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-medium rounded-full">Recommended</span>
+                )}
               </button>
 
               {/* PDF Upload */}

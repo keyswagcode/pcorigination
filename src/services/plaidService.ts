@@ -25,9 +25,11 @@ export async function createLinkToken(): Promise<string> {
   return data.link_token;
 }
 
-export async function exchangePublicToken(publicToken: string, borrowerId: string) {
-  return callPlaidFunction('exchange_token', {
-    public_token: publicToken,
-    borrower_id: borrowerId,
-  });
+export async function notifyLinkSuccess(): Promise<void> {
+  await callPlaidFunction('link_success');
+}
+
+export async function getReportStatus(): Promise<'pending' | 'ready' | 'error' | null> {
+  const data = await callPlaidFunction('get_report_status');
+  return data.status;
 }
