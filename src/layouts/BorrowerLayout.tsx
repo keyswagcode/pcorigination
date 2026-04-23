@@ -72,13 +72,13 @@ export function BorrowerLayout() {
                   </span>
                 </Link>
               )}
-              <button
-                onClick={() => window.location.href = 'mailto:support@example.com'}
+              <a
+                href="mailto:lindsay@keyrealestatecapital.com?subject=Help%20with%20my%20loan%20application"
                 className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <HelpCircle className="w-4 h-4" />
                 <span className="hidden sm:inline">Help</span>
-              </button>
+              </a>
               <button
                 onClick={handleSignOut}
                 className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
