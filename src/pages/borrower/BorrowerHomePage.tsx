@@ -114,47 +114,59 @@ export function BorrowerHomePage() {
 
   const { open: openPlaid, ready: plaidReady } = usePlaidLink({
     token: linkToken,
-    onSuccess: async () => {
-      try {
-        await notifyLinkSuccess();
-        setReportPending(true);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to start report');
-      }
+    onSuccess: () => {
       setPlaidLoading(false);
+      setReportPending(true);
+      notifyLinkSuccess().catch(err => {
+        setError(err instanceof Error ? err.message : 'Failed to start report');
+      });
     },
     onExit: () => { setPlaidLoading(false); },
   });
 
-  // Poll for Plaid Check report readiness while pending
+  // Poll for Plaid Check report readiness while pending. First check runs
+  // immediately in case the webhook already landed, then every 2s.
   useEffect(() => {
     if (!reportPending) return;
     let cancelled = false;
-    const interval = setInterval(async () => {
+
+    const check = async () => {
       try {
         const status = await getReportStatus();
-        if (cancelled) return;
+        if (cancelled) return false;
         if (status === 'ready') {
-          clearInterval(interval);
-          setReportPending(false);
           const { data: profile } = await supabase
             .from('borrower_financial_profiles')
             .select('liquidity_estimate')
             .eq('borrower_id', borrower!.id)
             .maybeSingle();
+          if (cancelled) return true;
           if (profile?.liquidity_estimate) {
             await generatePreApprovals(profile.liquidity_estimate);
           }
-          await loadData();
+          if (!cancelled) {
+            setReportPending(false);
+            await loadData();
+          }
+          return true;
         } else if (status === 'error') {
-          clearInterval(interval);
-          setReportPending(false);
-          setError('Bank report failed to generate. Please try reconnecting.');
+          if (!cancelled) {
+            setReportPending(false);
+            setError('Bank report failed to generate. Please try reconnecting.');
+          }
+          return true;
         }
       } catch {
-        // Ignore transient polling errors
+        // Transient polling error — keep going
       }
-    }, 5000);
+      return false;
+    };
+
+    check();
+    const interval = setInterval(async () => {
+      const done = await check();
+      if (done) clearInterval(interval);
+    }, 2000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [reportPending, borrower, loadData]);
 
@@ -551,6 +563,16 @@ export function BorrowerHomePage() {
         <div className="mb-6 px-4 py-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 flex items-center gap-2">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {error}
+        </div>
+      )}
+
+      {reportPending && (
+        <div className="mb-6 px-4 py-3 bg-teal-50 border border-teal-200 rounded-lg flex items-center gap-3">
+          <Loader2 className="w-4 h-4 flex-shrink-0 text-teal-600 animate-spin" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-teal-900">Bank connected — generating your report</p>
+            <p className="text-xs text-teal-700">This usually takes under a minute. You can stay on this page.</p>
+          </div>
         </div>
       )}
 
