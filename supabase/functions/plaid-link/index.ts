@@ -139,7 +139,7 @@ serve(async (req) => {
       }
 
       const tokenData = await plaidRequest('/link/token/create', {
-        user: { user_id: plaidUserId },
+        user_id: plaidUserId,
         client_name: 'Key Real Estate Capital',
         products: ['cra_base_report'],
         consumer_report_permissible_purpose: 'CREDIT_PREQUALIFICATION',
