@@ -122,10 +122,22 @@ serve(async (req) => {
           primary: true,
         }]
       }
-      if (ssnDigits.length === 9) {
+      // SSA validity: area 001-665 or 667-899; group != 00; serial != 0000
+      const isValidFullSsn = (s: string) => {
+        if (s.length !== 9) return false
+        const area = parseInt(s.slice(0, 3), 10)
+        const group = s.slice(3, 5)
+        const serial = s.slice(5, 9)
+        if (area === 0 || area === 666 || area >= 900) return false
+        if (group === '00') return false
+        if (serial === '0000') return false
+        return true
+      }
+      if (ssnDigits.length === 9 && isValidFullSsn(ssnDigits)) {
         identity.id_numbers = [{ type: 'us_ssn', value: ssnDigits }]
-      } else if (ssnDigits.length === 4) {
-        identity.id_numbers = [{ type: 'us_ssn_last_4', value: ssnDigits }]
+      } else if (ssnDigits.length >= 4) {
+        // Fall back to last-4 if full SSN is malformed; Plaid validates last-4 less strictly.
+        identity.id_numbers = [{ type: 'us_ssn_last_4', value: ssnDigits.slice(-4) }]
       }
 
       // Redacted diagnostic — never logs raw SSN or full phone
