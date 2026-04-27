@@ -102,11 +102,15 @@ serve(async (req) => {
       const email = borrower.email || user.email
       if (email) identity.emails = [{ data: email, primary: true }]
       if (borrower.phone) {
-        const phoneDigits = borrower.phone.replace(/\D/g, '')
-        let e164: string | null = null
-        if (phoneDigits.length === 10) e164 = `+1${phoneDigits}`
-        else if (phoneDigits.length === 11 && phoneDigits.startsWith('1')) e164 = `+${phoneDigits}`
-        if (e164) identity.phone_numbers = [{ data: e164, primary: true }]
+        const raw = borrower.phone.replace(/\D/g, '')
+        const ten = raw.length === 11 && raw.startsWith('1') ? raw.slice(1) : raw
+        // NANP validation: 10 digits, area code first digit 2-9, exchange first digit 2-9,
+        // not a 555 reserved prefix (555-01XX is for fictional use).
+        const valid = ten.length === 10
+          && /^[2-9]/.test(ten)
+          && /^.{3}[2-9]/.test(ten)
+          && !(ten.slice(3, 6) === '555' && ten.slice(6, 8) === '01')
+        if (valid) identity.phone_numbers = [{ data: `+1${ten}`, primary: true }]
       }
       if (borrower.address_street && borrower.address_city && borrower.address_state && borrower.address_zip) {
         identity.addresses = [{
