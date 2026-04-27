@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import type { Borrower } from '../../shared/types';
-import { User, Building2, Save, Loader2, CheckCircle, FileText, UserPlus, Trash2, Send } from 'lucide-react';
+import { User, Building2, Save, Loader2, CheckCircle, FileText, UserPlus, Trash2, Send, Eye, EyeOff, Shield } from 'lucide-react';
 
 const LOAN_TYPES = [
   { value: 'bank_statement', label: 'Bank Statement', description: 'Use bank deposits to qualify instead of tax returns' },
@@ -34,6 +34,15 @@ export function BorrowerProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [showSsn, setShowSsn] = useState(false);
+  const [ssnInput, setSsnInput] = useState('');
+
+  const formatSsnDisplay = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 9);
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+    return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+  };
   const [borrower, setBorrower] = useState<Partial<Borrower & { preferred_loan_type: string }>>({
     borrower_name: '',
     email: '',
@@ -63,6 +72,8 @@ export function BorrowerProfilePage() {
 
       if (data) {
         setBorrower(data);
+        const storedSsn = (data as Record<string, unknown>).ssn_encrypted as string | null;
+        if (storedSsn) setSsnInput(formatSsnDisplay(storedSsn));
       } else {
         const { data: userAccount } = await supabase
           .from('user_accounts')
@@ -94,11 +105,16 @@ export function BorrowerProfilePage() {
         ? 'loan_type_selected'
         : 'profile_created';
 
+      const ssnDigits = ssnInput.replace(/\D/g, '');
       const borrowerData = {
         ...borrower,
         user_id: user!.id,
         borrower_status: borrower.borrower_status || 'draft',
-        lifecycle_stage: lifecycleStage
+        lifecycle_stage: lifecycleStage,
+        ...(ssnDigits.length === 9 ? {
+          ssn_encrypted: ssnDigits,
+          ssn_last4: ssnDigits.slice(-4),
+        } : {}),
       };
 
       if (borrower.id) {
@@ -254,6 +270,48 @@ export function BorrowerProfilePage() {
               />
               <p className="text-xs text-gray-500 mt-1">
                 Your approximate FICO score
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date of Birth
+              </label>
+              <input
+                type="date"
+                value={(borrower as Record<string, unknown>).date_of_birth as string || ''}
+                onChange={e => setBorrower({ ...borrower, date_of_birth: e.target.value } as typeof borrower)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Social Security Number
+              </label>
+              <div className="relative">
+                <input
+                  type={showSsn ? 'text' : 'password'}
+                  value={ssnInput}
+                  onChange={e => setSsnInput(formatSsnDisplay(e.target.value))}
+                  className="w-full px-4 py-2.5 pr-20 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 font-mono"
+                  placeholder="XXX-XX-XXXX"
+                  autoComplete="off"
+                />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSsn(!showSsn)}
+                    className="p-1 text-gray-400 hover:text-teal-600 transition-colors"
+                    title={showSsn ? 'Hide SSN' : 'Show SSN'}
+                  >
+                    {showSsn ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                  <Shield className="w-4 h-4 text-teal-500" />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Encrypted and used only for identity verification with our credit partners.
               </p>
             </div>
           </div>
