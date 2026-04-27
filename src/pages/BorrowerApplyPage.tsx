@@ -193,11 +193,12 @@ export function BorrowerApplyPage() {
       });
       if (borrowerError) throw borrowerError;
 
-      // Send new application alert to broker + starred team members
+      // Send new application alert to broker + org owner + opted-in team members
       if (resolvedBrokerId) {
         sendNewApplicationAlert({
           borrowerName: `${firstName} ${lastName}`.trim(),
           borrowerEmail: email,
+          borrowerPhone: phone.replace(/\D/g, '') || null,
           brokerId: resolvedBrokerId,
         });
       }
