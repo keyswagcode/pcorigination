@@ -10,6 +10,7 @@ import { NewLoanPage } from './pages/borrower/NewLoanPage';
 import { BorrowerQueuePage } from './pages/internal/BorrowerQueuePage';
 import { BorrowerFilePage } from './pages/internal/BorrowerFilePage';
 import { InternalPlacerBotPage } from './pages/internal/InternalPlacerBotPage';
+import { AllLoansPage } from './pages/internal/AllLoansPage';
 import { BorrowerApplyPage } from './pages/BorrowerApplyPage';
 import { BorrowerDocumentsPage } from './pages/borrower/BorrowerDocumentsPage';
 import { BorrowerLoansPage } from './pages/borrower/BorrowerLoansPage';
@@ -179,6 +180,7 @@ function AppRoutes() {
           <Route path="borrowers" element={<BorrowerQueuePage />} />
           <Route path="borrowers/:borrowerId" element={<BorrowerFilePage />} />
           <Route path="placerbot" element={<InternalPlacerBotPage />} />
+          <Route path="loans" element={<AllLoansPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

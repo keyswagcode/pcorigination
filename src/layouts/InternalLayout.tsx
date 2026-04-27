@@ -8,7 +8,8 @@ import {
   Menu,
   X,
   Shield,
-  Settings
+  Settings,
+  Briefcase
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -22,6 +23,7 @@ const adminNavItems = [
   { to: '/internal/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/internal/my-borrowers', icon: Users, label: 'My Borrowers' },
   { to: '/internal/borrowers', icon: Users, label: 'All Borrowers' },
+  { to: '/internal/loans', icon: Briefcase, label: 'All Loans' },
   { to: '/internal/placerbot', icon: Bot, label: 'PlacerBot' },
   { to: '/internal/settings', icon: Settings, label: 'Settings' },
 ];
