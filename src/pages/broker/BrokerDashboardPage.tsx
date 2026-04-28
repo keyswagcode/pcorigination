@@ -216,6 +216,26 @@ export function BrokerDashboardPage() {
         </div>
       </div>
 
+      {/* Admin diagnostic — appears only when admin role detected but list is empty */}
+      {borrowers.length === 0 && (userAccount?.user_role === 'admin' || userAccount?.user_role === 'reviewer') && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 text-sm">
+          <p className="font-semibold text-amber-900 mb-2">No borrowers visible — diagnostic</p>
+          <div className="space-y-1 text-amber-800 font-mono text-xs">
+            <div>user_id: {user?.id || '(none)'}</div>
+            <div>user_role: {userAccount?.user_role || '(missing)'}</div>
+            <div>broker_role: {userAccount?.broker_role || '(missing)'}</div>
+            <div>org member row: {member ? 'yes' : 'no'}</div>
+            <div>org member role: {member?.role || '(none)'}</div>
+            <div>org members in team: {members.length}</div>
+          </div>
+          <div className="mt-3 text-amber-900 text-xs">
+            Most common cause: RLS on the <code>borrowers</code> table doesn't grant admin read access. Run the
+            admin RLS policy script in the SQL editor (the one that creates <code>admin_full_access_borrowers</code>).
+            If user_role isn't <code>admin</code> above, run the backfill SQL and re-login.
+          </div>
+        </div>
+      )}
+
       {/* POS Link */}
       {posUrl && (
         <div className="bg-white border border-gray-200 rounded-xl px-5 py-4 flex items-center justify-between">
