@@ -10,7 +10,8 @@ import {
   Shield,
   Settings,
   Briefcase,
-  FileText
+  FileText,
+  ClipboardList
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -24,6 +25,7 @@ const adminNavItems = [
   { to: '/internal/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/internal/my-borrowers', icon: Users, label: 'My Borrowers' },
   { to: '/internal/borrowers', icon: Users, label: 'All Borrowers' },
+  { to: '/internal/applications', icon: ClipboardList, label: 'All Applications' },
   { to: '/internal/loans', icon: Briefcase, label: 'All Loans' },
   { to: '/internal/files', icon: FileText, label: 'All Files' },
   { to: '/internal/placerbot', icon: Bot, label: 'PlacerBot' },
