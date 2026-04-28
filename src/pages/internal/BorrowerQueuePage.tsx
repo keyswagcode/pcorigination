@@ -129,11 +129,19 @@ export function BorrowerQueuePage() {
     );
   };
 
-  const filteredBorrowers = borrowers.filter(b =>
-    !searchQuery ||
-    b.borrower_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    b.email?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredBorrowers = borrowers.filter(b => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    const phone = (b.phone || '').replace(/\D/g, '');
+    const queryDigits = searchQuery.replace(/\D/g, '');
+    return b.borrower_name?.toLowerCase().includes(q)
+      || b.email?.toLowerCase().includes(q)
+      || (queryDigits && phone.includes(queryDigits))
+      || (b as Record<string, unknown>).llc_name?.toString().toLowerCase().includes(q)
+      || (b as Record<string, unknown>).address_street?.toString().toLowerCase().includes(q)
+      || (b as Record<string, unknown>).address_city?.toString().toLowerCase().includes(q)
+      || b.state_of_residence?.toLowerCase().includes(q);
+  });
 
   return (
     <div className="space-y-6">
@@ -156,7 +164,7 @@ export function BorrowerQueuePage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by name or email..."
+              placeholder="Search by name, email, phone, LLC, or address..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
