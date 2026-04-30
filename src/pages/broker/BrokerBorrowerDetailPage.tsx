@@ -8,6 +8,7 @@ import {
   Edit3, Save, X, Plus, Mail, Phone, ExternalLink
 } from 'lucide-react';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
+import { generateStatementsPdf } from '../../lib/statementPdfGenerator';
 import { logAudit, getAuditTrail } from '../../services/auditService';
 import type { AuditEntry } from '../../services/auditService';
 
@@ -130,6 +131,8 @@ export function BrokerBorrowerDetailPage() {
   const [paLiquidity, setPaLiquidity] = useState('');
   const [generatingPA, setGeneratingPA] = useState(false);
   const [revealedSSNs, setRevealedSSNs] = useState<Set<string>>(new Set());
+  const [plaidReport, setPlaidReport] = useState<Record<string, unknown> | null>(null);
+  const [generatingStatements, setGeneratingStatements] = useState(false);
 
   const toggleSSN = (id: string) => {
     setRevealedSSNs(prev => {
@@ -158,6 +161,18 @@ export function BrokerBorrowerDetailPage() {
       supabase.from('borrower_activity_log').select('id, event_type, title, details, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }).limit(50),
       supabase.from('co_borrowers').select('id, borrower_name, email, phone, date_of_birth, ssn_last4, ssn_encrypted, credit_score, address_street, address_city, address_state, address_zip, status, filled_by_self, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: true }),
     ]);
+
+    const { data: profile } = await supabase
+      .from('borrower_financial_profiles')
+      .select('summary')
+      .eq('borrower_id', borrowerId)
+      .maybeSingle();
+    const summary = profile?.summary as Record<string, unknown> | null;
+    if (summary?.source === 'plaid_cra_base_report' && summary.report) {
+      setPlaidReport(summary.report as Record<string, unknown>);
+    } else {
+      setPlaidReport(null);
+    }
 
     setBorrower(bRes.data);
     setCoBorrowers(cbRes.data || []);
@@ -474,6 +489,33 @@ export function BrokerBorrowerDetailPage() {
     }
   };
 
+  const handleDownloadStatements = async () => {
+    if (!plaidReport || !borrower) return;
+    setGeneratingStatements(true);
+    try {
+      let orgName = 'Key Real Estate Capital';
+      if (user) {
+        const { data: orgMember } = await supabase
+          .from('organization_members')
+          .select('organizations(name)')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        const org = orgMember?.organizations as unknown as { name?: string } | null;
+        if (org?.name) orgName = org.name;
+      }
+      generateStatementsPdf(plaidReport as Parameters<typeof generateStatementsPdf>[0], {
+        borrowerName: borrower.borrower_name,
+        orgName,
+        monthsToCover: 2,
+      });
+    } catch (err) {
+      console.error('Failed to generate statements:', err);
+      alert('Failed to generate bank statements.');
+    } finally {
+      setGeneratingStatements(false);
+    }
+  };
+
   const handleDownloadDoc = async (doc: UploadedDoc) => {
     try {
       const { data, error } = await supabase.storage
@@ -544,6 +586,17 @@ export function BrokerBorrowerDetailPage() {
               title={`Text ${borrower.borrower_name}`}>
               <Phone className="w-4 h-4" /> Text
             </a>
+          )}
+          {plaidReport && (
+            <button
+              onClick={handleDownloadStatements}
+              disabled={generatingStatements}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
+              title="Download last 2 months of bank statements from verified Plaid data"
+            >
+              {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Bank Statements
+            </button>
           )}
           <a href="https://keyrealestatecapital.com/calculator" target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
