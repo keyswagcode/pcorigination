@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { ArrowRight, ArrowLeft, Eye, EyeOff, Building2, Shield } from 'lucide-react';
 import { sendNewApplicationAlert } from '../services/newAppAlertService';
+import { AddressAutocomplete } from '../components/AddressAutocomplete';
 
 type Step = 'credentials' | 'profile';
 
@@ -411,7 +412,7 @@ export function BorrowerApplyPage() {
               </div>
 
               <form onSubmit={handleProfile} className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
                     <input
@@ -448,7 +449,7 @@ export function BorrowerApplyPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth *</label>
                     <input
@@ -492,27 +493,32 @@ export function BorrowerApplyPage() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Primary Address *</label>
-                  <input
-                    type="text"
+                  <AddressAutocomplete
                     value={addressStreet}
-                    onChange={e => setAddressStreet(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent mb-2"
-                    placeholder="123 Main St"
+                    onChange={setAddressStreet}
+                    onAddressSelected={parsed => {
+                      if (parsed.street) setAddressStreet(parsed.street);
+                      if (parsed.city) setAddressCity(parsed.city);
+                      if (parsed.state) setAddressState(parsed.state);
+                      if (parsed.zip) setAddressZip(parsed.zip);
+                    }}
+                    placeholder="Start typing an address…"
                     required
+                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent mb-2"
                   />
-                  <div className="grid grid-cols-6 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-6 gap-2">
                     <input
                       type="text"
                       value={addressCity}
                       onChange={e => setAddressCity(e.target.value)}
-                      className="col-span-3 px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
+                      className="sm:col-span-3 px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
                       placeholder="City"
                       required
                     />
                     <select
                       value={addressState}
                       onChange={e => setAddressState(e.target.value)}
-                      className="col-span-1 px-2 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
+                      className="sm:col-span-1 px-2 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
                       required
                     >
                       <option value="">ST</option>
@@ -522,7 +528,7 @@ export function BorrowerApplyPage() {
                       type="text"
                       value={addressZip}
                       onChange={e => setAddressZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
-                      className="col-span-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
+                      className="sm:col-span-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
                       placeholder="Zip"
                       required
                     />
