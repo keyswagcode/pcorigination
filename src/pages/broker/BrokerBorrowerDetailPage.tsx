@@ -834,11 +834,24 @@ export function BrokerBorrowerDetailPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Documents</h2>
-            <label className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors ${uploading ? 'bg-gray-100 text-gray-400' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>
-              <input type="file" onChange={handleDocUpload} className="hidden" />
-              {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              Upload Doc
-            </label>
+            <div className="flex items-center gap-2">
+              {plaidReport && (
+                <button
+                  onClick={handleDownloadStatements}
+                  disabled={generatingStatements}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
+                  title="Download last 2 months of bank statements (Plaid verified)"
+                >
+                  {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  Download Bank Statements
+                </button>
+              )}
+              <label className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors ${uploading ? 'bg-gray-100 text-gray-400' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>
+                <input type="file" onChange={handleDocUpload} className="hidden" />
+                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                Upload Doc
+              </label>
+            </div>
           </div>
           {documents.length === 0 ? (
             <div className="border border-gray-200 rounded-xl bg-white p-8 text-center">
