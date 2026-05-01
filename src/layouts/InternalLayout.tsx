@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import {
   LayoutDashboard,
   Users,
@@ -13,7 +14,7 @@ import {
   FileText,
   ClipboardList
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const brokerNavItems = [
   { to: '/internal/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -33,9 +34,28 @@ const adminNavItems = [
 ];
 
 export function InternalLayout() {
-  const { userAccount, signOut } = useAuth();
+  const { user, userAccount, signOut } = useAuth();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [orgName, setOrgName] = useState<string>('Loan Platform');
+  const [orgLogoUrl, setOrgLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('organization_members')
+        .select('organizations(name, logo_url)')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      const org = data?.organizations as unknown as { name?: string; logo_url?: string | null } | null;
+      if (org?.name) setOrgName(org.name);
+      if (org?.logo_url) setOrgLogoUrl(org.logo_url);
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -50,14 +70,24 @@ export function InternalLayout() {
       <header className="bg-slate-800 text-white sticky top-0 z-40">
         <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-amber-500 rounded-lg flex items-center justify-center">
-                <Shield className="w-4 h-4 text-slate-800" />
-              </div>
-              <span className="text-lg font-semibold hidden sm:block">
-                Loan Platform
-              </span>
-            </div>
+            <NavLink to="/internal/dashboard" className="flex items-center gap-3">
+              {orgLogoUrl ? (
+                <img
+                  src={orgLogoUrl}
+                  alt={orgName}
+                  className="h-8 max-w-[160px] object-contain bg-white/95 rounded-md px-1.5 py-0.5"
+                />
+              ) : (
+                <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-amber-500 rounded-lg flex items-center justify-center">
+                  <Shield className="w-4 h-4 text-slate-800" />
+                </div>
+              )}
+              {!orgLogoUrl && (
+                <span className="text-lg font-semibold hidden sm:block">
+                  {orgName}
+                </span>
+              )}
+            </NavLink>
 
             <nav className="hidden md:flex items-center gap-1">
               {navItems.map(({ to, icon: Icon, label }) => (
