@@ -18,6 +18,8 @@ import {
 interface BorrowerQueueItem extends Borrower {
   identity_status?: string;
   document_count?: number;
+  owner_name?: string;
+  owner_email?: string;
 }
 
 const STATUS_OPTIONS = [
@@ -78,7 +80,26 @@ export function BorrowerQueuePage() {
       }
 
       const { data } = await query.limit(100);
-      setBorrowers(data || []);
+      const rows = (data || []) as BorrowerQueueItem[];
+
+      const brokerIds = Array.from(new Set(rows.map(b => (b as Record<string, unknown>).broker_id as string).filter(Boolean)));
+      if (brokerIds.length > 0) {
+        const { data: brokers } = await supabase
+          .from('user_accounts')
+          .select('id, first_name, last_name, email')
+          .in('id', brokerIds);
+        const byId = new Map((brokers || []).map(b => [b.id, b]));
+        for (const r of rows) {
+          const brokerId = (r as Record<string, unknown>).broker_id as string | undefined;
+          const broker = brokerId ? byId.get(brokerId) : undefined;
+          r.owner_name = broker
+            ? [broker.first_name, broker.last_name].filter(Boolean).join(' ') || broker.email || 'Owner'
+            : undefined;
+          r.owner_email = broker?.email || undefined;
+        }
+      }
+
+      setBorrowers(rows);
     } finally {
       setLoading(false);
     }
@@ -240,6 +261,9 @@ export function BorrowerQueuePage() {
                     Stage
                   </th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Owner
+                  </th>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Loan Type
                   </th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -267,6 +291,18 @@ export function BorrowerQueuePage() {
                     </td>
                     <td className="px-6 py-4">
                       {getLifecycleBadge(borrower.lifecycle_stage)}
+                    </td>
+                    <td className="px-6 py-4">
+                      {borrower.owner_name ? (
+                        <div>
+                          <p className="text-sm text-gray-900">{borrower.owner_name}</p>
+                          {borrower.owner_email && (
+                            <p className="text-xs text-gray-500">{borrower.owner_email}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">Unassigned</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-sm text-gray-600">
