@@ -212,16 +212,74 @@ serve(async (req) => {
       })
     }
 
-    // Polling endpoint so the borrower UI can check report status
+    // Polling endpoint so the borrower UI can check report status.
+    // If status is still 'pending', we also attempt to fetch the report
+    // directly from Plaid in case the webhook never fired or is delayed.
     if (action === 'get_report_status') {
       const { data: borrower } = await serviceClient
         .from('borrowers')
-        .select('plaid_report_status')
+        .select('id, plaid_report_status, plaid_user_id')
         .eq('user_id', user.id)
         .maybeSingle()
 
+      let status = borrower?.plaid_report_status || null
+
+      if ((status === 'pending' || !status) && borrower?.plaid_user_id) {
+        try {
+          const reportData = await plaidRequest('/cra/check_report/base_report/get', {
+            user_id: borrower.plaid_user_id,
+          })
+          const report = reportData.report || reportData
+
+          // Compute liquidity from depository accounts
+          let totalLiquidity = 0
+          const items = (report?.items || []) as Array<Record<string, unknown>>
+          for (const item of items) {
+            const accounts = (item.accounts || []) as Array<Record<string, unknown>>
+            for (const acct of accounts) {
+              if (acct.type === 'depository') {
+                const balances = (acct.balances || {}) as Record<string, number | null>
+                const balance = balances.current ?? balances.available ?? 0
+                totalLiquidity += Number(balance) || 0
+              }
+            }
+          }
+
+          await serviceClient.from('borrower_financial_profiles').upsert({
+            borrower_id: borrower.id,
+            liquidity_estimate: totalLiquidity,
+            ending_balance_avg: totalLiquidity,
+            confidence_score: 95,
+            summary: {
+              source: 'plaid_cra_base_report',
+              verified_at: new Date().toISOString(),
+              total_liquidity: totalLiquidity,
+              report,
+            },
+          }, { onConflict: 'borrower_id' })
+
+          await serviceClient
+            .from('borrowers')
+            .update({
+              plaid_report_status: 'ready',
+              lifecycle_stage: 'liquidity_verified',
+            })
+            .eq('id', borrower.id)
+
+          status = 'ready'
+        } catch (err) {
+          // PRODUCT_NOT_READY etc. — keep status as pending so polling continues.
+          const msg = (err as Error).message || ''
+          if (msg.includes('NOT_READY') || msg.includes('not ready') || msg.includes('PENDING')) {
+            // genuinely still generating
+          } else {
+            console.warn('Direct Plaid report fetch failed:', msg)
+          }
+        }
+      }
+
       return new Response(JSON.stringify({
-        status: borrower?.plaid_report_status || null,
+        status,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })

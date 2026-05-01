@@ -129,10 +129,13 @@ export function BorrowerHomePage() {
   });
 
   // Poll for Plaid Check report readiness while pending. First check runs
-  // immediately in case the webhook already landed, then every 2s.
+  // immediately in case the webhook already landed, then every 3s. Times
+  // out after 2 minutes so the spinner doesn't run forever.
   useEffect(() => {
     if (!reportPending) return;
     let cancelled = false;
+    const startedAt = Date.now();
+    const TIMEOUT_MS = 2 * 60 * 1000;
 
     const check = async () => {
       try {
@@ -163,6 +166,13 @@ export function BorrowerHomePage() {
       } catch {
         // Transient polling error — keep going
       }
+      if (Date.now() - startedAt > TIMEOUT_MS) {
+        if (!cancelled) {
+          setReportPending(false);
+          setError('The bank report is taking longer than expected. Refresh in a minute or try reconnecting.');
+        }
+        return true;
+      }
       return false;
     };
 
@@ -170,7 +180,7 @@ export function BorrowerHomePage() {
     const interval = setInterval(async () => {
       const done = await check();
       if (done) clearInterval(interval);
-    }, 2000);
+    }, 3000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [reportPending, borrower, loadData]);
 
