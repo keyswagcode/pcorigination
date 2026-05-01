@@ -339,9 +339,9 @@ export function BorrowerQueuePage() {
                     <td className="px-6 py-4 text-right">
                       <Link
                         to={`/internal/my-borrowers/${borrower.id}`}
-                        className="inline-flex items-center gap-1 text-teal-600 font-medium text-sm hover:text-teal-700"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
                       >
-                        Review <ArrowRight className="w-4 h-4" />
+                        View <ArrowRight className="w-3.5 h-3.5" />
                       </Link>
                     </td>
                   </tr>

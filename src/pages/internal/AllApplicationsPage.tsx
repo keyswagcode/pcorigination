@@ -239,9 +239,9 @@ export function AllApplicationsPage() {
                     {a.borrower_id && (
                       <Link
                         to={`/internal/my-borrowers/${a.borrower_id}`}
-                        className="inline-flex items-center gap-1 text-teal-700 text-xs font-medium hover:text-teal-900"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
                       >
-                        Review <ArrowRight className="w-3.5 h-3.5" />
+                        View <ArrowRight className="w-3.5 h-3.5" />
                       </Link>
                     )}
                   </td>
