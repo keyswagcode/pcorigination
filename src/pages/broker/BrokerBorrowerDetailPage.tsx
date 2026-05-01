@@ -320,7 +320,10 @@ export function BrokerBorrowerDetailPage() {
     if (!file || !borrower) return;
     setUploading(true);
     const filePath = `${borrower.id}/broker_upload/${Date.now()}_${file.name}`;
-    await supabase.storage.from('borrower-documents').upload(filePath, file);
+    await supabase.storage.from('borrower-documents').upload(filePath, file, {
+      contentType: file.type || 'application/octet-stream',
+      upsert: false,
+    });
     await supabase.from('uploaded_documents').insert({
       borrower_id: borrower.id,
       document_type: 'broker_uploaded',
@@ -342,16 +345,9 @@ export function BrokerBorrowerDetailPage() {
     try {
       const { data, error } = await supabase.storage
         .from('borrower-documents')
-        .download(doc.file_path);
-      if (error) throw error;
-      if (data) {
-        const mimeType = doc.file_name.endsWith('.pdf') ? 'application/pdf' :
-          doc.file_name.match(/\.(jpg|jpeg)$/i) ? 'image/jpeg' :
-          doc.file_name.match(/\.(png)$/i) ? 'image/png' : 'application/octet-stream';
-        const blob = new Blob([data], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-      }
+        .createSignedUrl(doc.file_path, 300);
+      if (error || !data?.signedUrl) throw error || new Error('Could not generate URL');
+      window.open(data.signedUrl, '_blank', 'noopener');
     } catch (err) {
       console.error('View failed:', err);
       alert('Failed to open document. Please try downloading instead.');
@@ -363,7 +359,10 @@ export function BrokerBorrowerDetailPage() {
     setUploadingCategory(category);
     try {
       const filePath = `${borrower.id}/${category}/${Date.now()}_${file.name}`;
-      await supabase.storage.from('borrower-documents').upload(filePath, file);
+      await supabase.storage.from('borrower-documents').upload(filePath, file, {
+        contentType: file.type || 'application/octet-stream',
+        upsert: false,
+      });
       await supabase.from('uploaded_documents').insert({
         borrower_id: borrower.id,
         document_type: category,
