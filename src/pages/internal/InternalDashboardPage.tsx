@@ -204,7 +204,7 @@ export function InternalDashboardPage() {
               {recentBorrowers.map(borrower => (
                 <Link
                   key={borrower.id}
-                  to={`/internal/borrowers/${borrower.id}`}
+                  to={`/internal/my-borrowers/${borrower.id}`}
                   className="flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
                 >
                   <div>
