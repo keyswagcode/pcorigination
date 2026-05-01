@@ -845,21 +845,23 @@ export function BrokerBorrowerDetailPage() {
                   Download Bank Statements
                 </button>
               )}
-              {borrower.email && (() => {
-                const portalUrl = `${window.location.origin}/application/documents`;
-                const body = `Hi ${(borrower.borrower_name || '').split(' ')[0] || 'there'},\n\nPlease sign in to your borrower portal and upload the following documents:\n\n- \n- \n- \n\nLink: ${portalUrl}\n\nThanks!`;
-                const mailto = `mailto:${borrower.email}?subject=${encodeURIComponent('Request for Additional Docs')}&body=${encodeURIComponent(body)}`;
-                return (
-                  <a
-                    href={mailto}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors"
-                    title="Open your mail app to email the borrower"
-                  >
-                    <Send className="w-4 h-4" />
-                    Request Documents
-                  </a>
-                );
-              })()}
+              {borrower.email && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const portalUrl = `${window.location.origin}/application/documents`;
+                    const firstName = (borrower.borrower_name || '').split(' ')[0] || 'there';
+                    const body = `Hi ${firstName},\r\n\r\nPlease sign in to your borrower portal and upload the following documents:\r\n\r\n- \r\n- \r\n- \r\n\r\nLink: ${portalUrl}\r\n\r\nThanks!`;
+                    const mailto = `mailto:${encodeURIComponent(borrower.email!)}?subject=${encodeURIComponent('Request for Additional Docs')}&body=${encodeURIComponent(body)}`;
+                    window.location.href = mailto;
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors"
+                  title="Open your mail app to email the borrower"
+                >
+                  <Send className="w-4 h-4" />
+                  Request Documents
+                </button>
+              )}
               <label className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors ${uploading ? 'bg-gray-100 text-gray-400' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>
                 <input type="file" onChange={handleDocUpload} className="hidden" />
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
