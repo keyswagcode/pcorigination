@@ -133,6 +133,42 @@ export function BrokerBorrowerDetailPage() {
   const [revealedSSNs, setRevealedSSNs] = useState<Set<string>>(new Set());
   const [plaidReport, setPlaidReport] = useState<Record<string, unknown> | null>(null);
   const [generatingStatements, setGeneratingStatements] = useState(false);
+  const [showDocRequest, setShowDocRequest] = useState(false);
+  const [docRequestMessage, setDocRequestMessage] = useState('');
+  const [sendingDocRequest, setSendingDocRequest] = useState(false);
+  const [docRequestSent, setDocRequestSent] = useState(false);
+
+  const handleSendDocRequest = async () => {
+    if (!borrower) return;
+    setSendingDocRequest(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/request-borrower-docs`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ borrower_id: borrower.id, message: docRequestMessage }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send request');
+      setDocRequestSent(true);
+      setTimeout(() => {
+        setShowDocRequest(false);
+        setDocRequestSent(false);
+        setDocRequestMessage('');
+      }, 1500);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to send request');
+    } finally {
+      setSendingDocRequest(false);
+    }
+  };
 
   const toggleSSN = (id: string) => {
     setRevealedSSNs(prev => {
@@ -845,6 +881,14 @@ export function BrokerBorrowerDetailPage() {
                   Download Bank Statements
                 </button>
               )}
+              <button
+                onClick={() => setShowDocRequest(true)}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors"
+                title="Email the borrower a sign-in link asking them to upload more docs"
+              >
+                <Send className="w-4 h-4" />
+                Request Documents
+              </button>
               <label className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg cursor-pointer transition-colors ${uploading ? 'bg-gray-100 text-gray-400' : 'bg-teal-600 text-white hover:bg-teal-700'}`}>
                 <input type="file" onChange={handleDocUpload} className="hidden" />
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
@@ -852,6 +896,46 @@ export function BrokerBorrowerDetailPage() {
               </label>
             </div>
           </div>
+
+          {showDocRequest && (
+            <div className="border border-amber-200 rounded-xl bg-amber-50 p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-amber-900">Request additional documents from {borrower.borrower_name}</h3>
+                <button
+                  onClick={() => { setShowDocRequest(false); setDocRequestMessage(''); }}
+                  className="p-1 text-amber-700 hover:text-amber-900"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-amber-800">
+                We'll email <span className="font-medium">{borrower.email}</span> a link to sign in and upload the documents you specify.
+              </p>
+              <textarea
+                value={docRequestMessage}
+                onChange={e => setDocRequestMessage(e.target.value)}
+                placeholder="Optional message — list the documents you need (e.g. 'Please upload your most recent W-2 and bank statements from the last 60 days.')"
+                rows={3}
+                className="w-full px-3 py-2 border border-amber-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+              />
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={() => { setShowDocRequest(false); setDocRequestMessage(''); }}
+                  className="px-3 py-1.5 text-sm text-gray-700 hover:bg-amber-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendDocRequest}
+                  disabled={sendingDocRequest || docRequestSent}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50"
+                >
+                  {sendingDocRequest ? <Loader2 className="w-4 h-4 animate-spin" /> : docRequestSent ? <CheckCircle2 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+                  {docRequestSent ? 'Sent!' : 'Send Email'}
+                </button>
+              </div>
+            </div>
+          )}
           {documents.length === 0 ? (
             <div className="border border-gray-200 rounded-xl bg-white p-8 text-center">
               <FileText className="w-10 h-10 text-gray-300 mx-auto mb-3" />
