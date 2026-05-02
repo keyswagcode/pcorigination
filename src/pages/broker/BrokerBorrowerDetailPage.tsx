@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -110,6 +110,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function BrokerBorrowerDetailPage() {
   const { borrowerId } = useParams<{ borrowerId: string }>();
+  const navigate = useNavigate();
   const { user, userAccount } = useAuth();
   const [borrower, setBorrower] = useState<Borrower | null>(null);
   const [coBorrowers, setCoBorrowers] = useState<CoBorrower[]>([]);
@@ -138,6 +139,37 @@ export function BrokerBorrowerDetailPage() {
   const [financialProfileLiquidity, setFinancialProfileLiquidity] = useState<number | null>(null);
   const [generatingStatements, setGeneratingStatements] = useState(false);
   const [statementMenuOpen, setStatementMenuOpen] = useState<'header' | 'docs' | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const isOwner = !!(user && borrower && borrower.broker_id === user.id);
+
+  const handleDeleteBorrower = async () => {
+    if (!borrower || !isOwner) return;
+    if (deleteConfirmText.trim() !== borrower.borrower_name.trim()) {
+      setDeleteError('The name you typed does not match.');
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      // Remove storage objects first; cascade FKs handle the rest of the rows.
+      const filePaths = documents.map(d => d.file_path).filter(Boolean);
+      if (filePaths.length > 0) {
+        await supabase.storage.from('borrower-documents').remove(filePaths);
+      }
+      const { error } = await supabase.from('borrowers').delete().eq('id', borrower.id);
+      if (error) throw error;
+      navigate('/internal/my-borrowers');
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete borrower');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const [pullingCredit, setPullingCredit] = useState(false);
   const [creditPullResult, setCreditPullResult] = useState<{ equifax: number | null; experian: number | null; transunion: number | null; mid_score: number | null } | null>(null);
   const [creditPullError, setCreditPullError] = useState<string | null>(null);
@@ -993,6 +1025,28 @@ export function BrokerBorrowerDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Danger Zone — only the borrower's owner can delete */}
+          {isOwner && (
+            <div className="mt-6 pt-6 border-t border-red-100">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-red-900">Danger Zone</h3>
+                  <p className="text-xs text-red-700 mt-1">
+                    Permanently delete this borrower and everything attached to them — documents, loans,
+                    pre-approvals, notes. This cannot be undone.
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmText(''); setDeleteError(null); }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors flex-shrink-0"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete Borrower
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1493,6 +1547,62 @@ export function BrokerBorrowerDetailPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Delete borrower confirmation */}
+      {showDeleteConfirm && borrower && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-red-900">Delete {borrower.borrower_name}?</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  This deletes the borrower, all their documents (in storage and DB), loans, pre-approvals,
+                  notes, co-borrowers, and activity. There is no undo.
+                </p>
+              </div>
+              <button onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Type <span className="font-semibold text-red-700">{borrower.borrower_name}</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={e => setDeleteConfirmText(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                placeholder={borrower.borrower_name}
+                autoFocus
+              />
+            </div>
+
+            {deleteError && (
+              <div className="px-3 py-2 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">{deleteError}</div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }}
+                disabled={deleting}
+                className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteBorrower}
+                disabled={deleting || deleteConfirmText.trim() !== borrower.borrower_name.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                {deleting ? 'Deleting…' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
