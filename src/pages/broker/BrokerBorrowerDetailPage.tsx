@@ -135,6 +135,7 @@ export function BrokerBorrowerDetailPage() {
   const [plaidReport, setPlaidReport] = useState<Record<string, unknown> | null>(null);
   const [financialProfileLiquidity, setFinancialProfileLiquidity] = useState<number | null>(null);
   const [generatingStatements, setGeneratingStatements] = useState(false);
+  const [statementMenuOpen, setStatementMenuOpen] = useState<'header' | 'docs' | null>(null);
 
   const toggleSSN = (id: string) => {
     setRevealedSSNs(prev => {
@@ -491,7 +492,7 @@ export function BrokerBorrowerDetailPage() {
     }
   };
 
-  const handleDownloadStatements = async () => {
+  const handleDownloadStatements = async (months: number) => {
     if (!plaidReport || !borrower) return;
     setGeneratingStatements(true);
     try {
@@ -508,13 +509,14 @@ export function BrokerBorrowerDetailPage() {
       generateStatementsPdf(plaidReport as Parameters<typeof generateStatementsPdf>[0], {
         borrowerName: borrower.borrower_name,
         orgName,
-        monthsToCover: 2,
+        monthsToCover: months,
       });
     } catch (err) {
       console.error('Failed to generate statements:', err);
       alert('Failed to generate bank statements.');
     } finally {
       setGeneratingStatements(false);
+      setStatementMenuOpen(false);
     }
   };
 
@@ -590,15 +592,30 @@ export function BrokerBorrowerDetailPage() {
             </a>
           )}
           {plaidReport && (
-            <button
-              onClick={handleDownloadStatements}
-              disabled={generatingStatements}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
-              title="Download last 2 months of bank statements from verified Plaid data"
-            >
-              {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              Bank Statements
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setStatementMenuOpen(statementMenuOpen === 'header' ? null : 'header')}
+                disabled={generatingStatements}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
+                title="Download bank statements from verified Plaid data"
+              >
+                {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Bank Statements
+              </button>
+              {statementMenuOpen === 'header' && (
+                <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+                  {[1, 2, 12].map(m => (
+                    <button
+                      key={m}
+                      onClick={() => handleDownloadStatements(m)}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 hover:text-teal-700"
+                    >
+                      Last {m} {m === 1 ? 'month' : 'months'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <a href="https://keyrealestatecapital.com/calculator" target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
@@ -884,15 +901,30 @@ export function BrokerBorrowerDetailPage() {
             <h2 className="text-lg font-semibold text-gray-900">Documents</h2>
             <div className="flex items-center gap-2">
               {plaidReport && (
-                <button
-                  onClick={handleDownloadStatements}
-                  disabled={generatingStatements}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
-                  title="Download last 2 months of bank statements (Plaid verified)"
-                >
-                  {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                  Download Bank Statements
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setStatementMenuOpen(statementMenuOpen === 'docs' ? null : 'docs')}
+                    disabled={generatingStatements}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
+                    title="Download bank statements (Plaid verified)"
+                  >
+                    {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    Download Bank Statements
+                  </button>
+                  {statementMenuOpen === 'docs' && (
+                    <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+                      {[1, 2, 12].map(m => (
+                        <button
+                          key={m}
+                          onClick={() => handleDownloadStatements(m)}
+                          className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 hover:text-teal-700"
+                        >
+                          Last {m} {m === 1 ? 'month' : 'months'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
               {borrower.email && (
                 <button
