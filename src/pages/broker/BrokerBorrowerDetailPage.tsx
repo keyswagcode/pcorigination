@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
 import { generateStatementsPdf } from '../../lib/statementPdfGenerator';
+import { estimateAnnualIncome } from '../../lib/incomeEstimator';
 import { logAudit, getAuditTrail } from '../../services/auditService';
 import type { AuditEntry } from '../../services/auditService';
 
@@ -132,6 +133,7 @@ export function BrokerBorrowerDetailPage() {
   const [generatingPA, setGeneratingPA] = useState(false);
   const [revealedSSNs, setRevealedSSNs] = useState<Set<string>>(new Set());
   const [plaidReport, setPlaidReport] = useState<Record<string, unknown> | null>(null);
+  const [financialProfileLiquidity, setFinancialProfileLiquidity] = useState<number | null>(null);
   const [generatingStatements, setGeneratingStatements] = useState(false);
 
   const toggleSSN = (id: string) => {
@@ -164,9 +166,10 @@ export function BrokerBorrowerDetailPage() {
 
     const { data: profile } = await supabase
       .from('borrower_financial_profiles')
-      .select('summary')
+      .select('liquidity_estimate, summary')
       .eq('borrower_id', borrowerId)
       .maybeSingle();
+    setFinancialProfileLiquidity(profile?.liquidity_estimate ?? null);
     const summary = profile?.summary as Record<string, unknown> | null;
     if (summary?.source === 'plaid_cra_base_report' && summary.report) {
       setPlaidReport(summary.report as Record<string, unknown>);
@@ -628,6 +631,52 @@ export function BrokerBorrowerDetailPage() {
           );
         })}
       </div>
+
+      {/* Verified Financials — only when Plaid CRA data exists */}
+      {plaidReport && activeTab === 'profile' && (() => {
+        const income = estimateAnnualIncome(plaidReport as Parameters<typeof estimateAnnualIncome>[0]);
+        return (
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-5 mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-teal-900">Plaid Verified Financials</h3>
+              <span className="text-xs text-teal-700">From last 12 months of bank activity</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-white rounded-lg px-4 py-3 border border-teal-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Estimated Annual Income</p>
+                <p className="text-xl font-semibold text-gray-900 mt-1">
+                  {income && income.annualIncome > 0
+                    ? `$${income.annualIncome.toLocaleString()}`
+                    : '—'}
+                </p>
+                {income && income.itemCount > 0 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    {income.itemCount} income {income.itemCount === 1 ? 'deposit' : 'deposits'} · {income.monthsCovered} mo of data
+                  </p>
+                )}
+              </div>
+              <div className="bg-white rounded-lg px-4 py-3 border border-teal-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Avg Monthly Income</p>
+                <p className="text-xl font-semibold text-gray-900 mt-1">
+                  {income && income.monthlyAverage > 0
+                    ? `$${income.monthlyAverage.toLocaleString()}`
+                    : '—'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Excludes transfers, refunds, and credit-card payments</p>
+              </div>
+              <div className="bg-white rounded-lg px-4 py-3 border border-teal-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Verified Liquidity</p>
+                <p className="text-xl font-semibold text-gray-900 mt-1">
+                  {financialProfileLiquidity != null
+                    ? `$${Math.round(financialProfileLiquidity).toLocaleString()}`
+                    : '—'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Sum of depository balances</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Tab Content */}
       {activeTab === 'profile' && (
