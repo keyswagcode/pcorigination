@@ -36,10 +36,20 @@ interface BorrowerForPull {
   credit_consent: boolean | null
 }
 
+interface CardPayment {
+  number: string
+  exp_month: string
+  exp_year: string
+  cvc: string
+  zip: string
+  name?: string
+}
+
 async function callIscApi(_params: {
   username: string
   password: string
   borrower: BorrowerForPull
+  card: CardPayment
 }): Promise<CreditPullResult> {
   // TODO: ISC Credit Bureau API call.
   // Once we have ISC's developer documentation (or a working sample request),
@@ -109,9 +119,20 @@ serve(async (req) => {
     }
 
     if (action === 'pull') {
-      const { borrower_id } = body
+      const { borrower_id, card } = body
       if (!borrower_id) {
         return new Response(JSON.stringify({ error: 'Missing borrower_id' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      if (!card || !card.number || !card.exp_month || !card.exp_year || !card.cvc || !card.zip) {
+        return new Response(JSON.stringify({ error: 'Card payment info is required for each pull. ISC bills the card directly; we do not store it.' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const sanitizedCardNumber = String(card.number).replace(/\D/g, '')
+      if (sanitizedCardNumber.length < 13 || sanitizedCardNumber.length > 19) {
+        return new Response(JSON.stringify({ error: 'Card number looks invalid.' }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
@@ -146,6 +167,14 @@ serve(async (req) => {
           username: brokerRow.isc_username,
           password: brokerRow.isc_password_encrypted,
           borrower: borrower as BorrowerForPull,
+          card: {
+            number: sanitizedCardNumber,
+            exp_month: String(card.exp_month).replace(/\D/g, '').padStart(2, '0').slice(-2),
+            exp_year: String(card.exp_year).replace(/\D/g, ''),
+            cvc: String(card.cvc).replace(/\D/g, ''),
+            zip: String(card.zip).replace(/\D/g, '').slice(0, 5),
+            name: card.name ? String(card.name).slice(0, 100) : undefined,
+          },
         })
       } catch (err) {
         await serviceClient.from('borrower_activity_log').insert({
@@ -153,6 +182,7 @@ serve(async (req) => {
           user_id: user.id,
           event_type: 'credit_pull_failed',
           title: 'Credit pull failed',
+          // Never include card or ISC creds in logs.
           details: (err as Error).message.slice(0, 500),
         })
         throw err

@@ -141,20 +141,55 @@ export function BrokerBorrowerDetailPage() {
   const [pullingCredit, setPullingCredit] = useState(false);
   const [creditPullResult, setCreditPullResult] = useState<{ equifax: number | null; experian: number | null; transunion: number | null; mid_score: number | null } | null>(null);
   const [creditPullError, setCreditPullError] = useState<string | null>(null);
+  const [showCreditCardModal, setShowCreditCardModal] = useState(false);
+  const [ccNumber, setCcNumber] = useState('');
+  const [ccExpMonth, setCcExpMonth] = useState('');
+  const [ccExpYear, setCcExpYear] = useState('');
+  const [ccCvc, setCcCvc] = useState('');
+  const [ccZip, setCcZip] = useState('');
+  const [ccName, setCcName] = useState('');
+
+  const formatCardNumber = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 19);
+    return digits.replace(/(.{4})/g, '$1 ').trim();
+  };
+
+  const closeCreditCardModal = () => {
+    setShowCreditCardModal(false);
+    setCcNumber('');
+    setCcExpMonth('');
+    setCcExpYear('');
+    setCcCvc('');
+    setCcZip('');
+    setCcName('');
+  };
 
   const handlePullCredit = async () => {
     if (!borrower) return;
+    const digits = ccNumber.replace(/\D/g, '');
+    if (digits.length < 13) {
+      setCreditPullError('Enter a valid card number.');
+      return;
+    }
     setPullingCredit(true);
     setCreditPullError(null);
     setCreditPullResult(null);
     try {
-      const res = await pullCreditForBorrower(borrower.id);
+      const res = await pullCreditForBorrower(borrower.id, {
+        number: digits,
+        exp_month: ccExpMonth,
+        exp_year: ccExpYear,
+        cvc: ccCvc,
+        zip: ccZip,
+        name: ccName || undefined,
+      });
       setCreditPullResult({
         equifax: res.equifax,
         experian: res.experian,
         transunion: res.transunion,
         mid_score: res.mid_score,
       });
+      closeCreditCardModal();
       await loadData();
     } catch (err) {
       setCreditPullError(err instanceof Error ? err.message : 'Failed to pull credit');
@@ -782,13 +817,12 @@ export function BrokerBorrowerDetailPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={handlePullCredit}
+                    onClick={() => { setCreditPullError(null); setShowCreditCardModal(true); }}
                     disabled={disabled}
                     title={tooltip}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {pullingCredit ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    {pullingCredit ? 'Pulling…' : 'Pull Credit'}
+                    Pull Credit
                   </button>
                 </div>
                 {!iscConnected && (
@@ -1459,6 +1493,126 @@ export function BrokerBorrowerDetailPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Credit pull payment modal */}
+      {showCreditCardModal && borrower && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Pull Credit for {borrower.borrower_name}</h3>
+                <p className="text-xs text-gray-500 mt-1">ISC bills your card directly. We do not store card details.</p>
+              </div>
+              <button onClick={closeCreditCardModal} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Cardholder Name</label>
+                <input
+                  type="text"
+                  value={ccName}
+                  onChange={e => setCcName(e.target.value)}
+                  autoComplete="cc-name"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  placeholder="As it appears on the card"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Card Number *</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={ccNumber}
+                  onChange={e => setCcNumber(formatCardNumber(e.target.value))}
+                  autoComplete="cc-number"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  placeholder="1234 5678 9012 3456"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">MM *</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={ccExpMonth}
+                    onChange={e => setCcExpMonth(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                    autoComplete="cc-exp-month"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                    placeholder="MM"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">YY *</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={ccExpYear}
+                    onChange={e => setCcExpYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    autoComplete="cc-exp-year"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                    placeholder="YY"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">CVC *</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={ccCvc}
+                    onChange={e => setCcCvc(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    autoComplete="cc-csc"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                    placeholder="123"
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Billing ZIP *</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={ccZip}
+                  onChange={e => setCcZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                  autoComplete="postal-code"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  placeholder="12345"
+                  required
+                />
+              </div>
+            </div>
+
+            {creditPullError && (
+              <div className="px-3 py-2 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">{creditPullError}</div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={closeCreditCardModal}
+                disabled={pullingCredit}
+                className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePullCredit}
+                disabled={pullingCredit || !ccNumber || !ccExpMonth || !ccExpYear || !ccCvc || !ccZip}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+              >
+                {pullingCredit ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {pullingCredit ? 'Pulling…' : 'Pull Credit & Charge Card'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

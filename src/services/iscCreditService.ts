@@ -36,6 +36,15 @@ export interface CreditPullResponse {
   mid_score: number | null;
 }
 
-export async function pullCreditForBorrower(borrowerId: string): Promise<CreditPullResponse> {
-  return callPullCreditFunction('pull', { borrower_id: borrowerId });
+export interface CardPaymentInput {
+  number: string;
+  exp_month: string;
+  exp_year: string;
+  cvc: string;
+  zip: string;
+  name?: string;
+}
+
+export async function pullCreditForBorrower(borrowerId: string, card: CardPaymentInput): Promise<CreditPullResponse> {
+  return callPullCreditFunction('pull', { borrower_id: borrowerId, card });
 }
