@@ -6,6 +6,7 @@ import {
   UserPlus, Users, Trash2, Shield, Star, Pencil, X
 } from 'lucide-react';
 import { inviteTeamMember } from '../../services/teamInviteService';
+import { saveIscCredentials, clearIscCredentials } from '../../services/iscCreditService';
 
 /** Determine if currentUser can edit targetMember */
 function canEditMember(currentRole: string, currentUserId: string, targetMember: { user_id: string; role: string | null; invited_by_user_id?: string | null }): boolean {
@@ -43,6 +44,46 @@ export function BrokerSettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  // ISC Credit
+  const [iscUsername, setIscUsername] = useState('');
+  const [iscPassword, setIscPassword] = useState('');
+  const [savingIsc, setSavingIsc] = useState(false);
+  const iscConnected = !!userAccount?.isc_username;
+
+  const handleSaveIsc = async () => {
+    if (!iscUsername || !iscPassword) return;
+    setSavingIsc(true);
+    setError(null);
+    try {
+      await saveIscCredentials(iscUsername, iscPassword);
+      await refreshUserAccount();
+      setIscPassword('');
+      setSuccess('ISC credentials saved');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save ISC credentials');
+    } finally {
+      setSavingIsc(false);
+    }
+  };
+
+  const handleDisconnectIsc = async () => {
+    setSavingIsc(true);
+    setError(null);
+    try {
+      await clearIscCredentials();
+      await refreshUserAccount();
+      setIscUsername('');
+      setIscPassword('');
+      setSuccess('ISC credentials removed');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove ISC credentials');
+    } finally {
+      setSavingIsc(false);
+    }
+  };
 
   // Team members
   interface TeamMember {
@@ -384,6 +425,66 @@ export function BrokerSettingsPage() {
               </label>
             </div>
             <p className="text-xs text-gray-500 mt-2">This logo appears on pre-approval PDF letters</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ISC Credit Bureau */}
+      <div className="border border-gray-200 rounded-xl bg-white p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+              <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h.01M11 15h2m4 4H7a2 2 0 01-2-2V7a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2z"/></svg>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Credit Pull (ISC)</h2>
+              <p className="text-sm text-gray-500">Your personal ISC Credit Bureau login. Used to soft-pull credit on your borrowers.</p>
+            </div>
+          </div>
+          {iscConnected && (
+            <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-medium rounded-full">Connected</span>
+          )}
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ISC Username</label>
+            <input
+              type="text"
+              value={iscUsername || (iscConnected ? userAccount?.isc_username || '' : '')}
+              onChange={e => setIscUsername(e.target.value)}
+              autoComplete="off"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+              placeholder="your-isc-login"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ISC Password</label>
+            <input
+              type="password"
+              value={iscPassword}
+              onChange={e => setIscPassword(e.target.value)}
+              autoComplete="new-password"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 font-mono"
+              placeholder={iscConnected ? '••••••••• (saved — re-enter to update)' : 'Enter your ISC password'}
+            />
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={handleSaveIsc}
+              disabled={savingIsc || !iscUsername || !iscPassword}
+              className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50"
+            >
+              {savingIsc ? 'Saving…' : iscConnected ? 'Update Credentials' : 'Save Credentials'}
+            </button>
+            {iscConnected && (
+              <button
+                onClick={handleDisconnectIsc}
+                disabled={savingIsc}
+                className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50"
+              >
+                Disconnect
+              </button>
+            )}
           </div>
         </div>
       </div>

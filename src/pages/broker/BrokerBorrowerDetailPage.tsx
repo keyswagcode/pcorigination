@@ -10,6 +10,7 @@ import {
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
 import { generateStatementsPdf } from '../../lib/statementPdfGenerator';
 import { estimateAnnualIncome } from '../../lib/incomeEstimator';
+import { pullCreditForBorrower } from '../../services/iscCreditService';
 import { logAudit, getAuditTrail } from '../../services/auditService';
 import type { AuditEntry } from '../../services/auditService';
 
@@ -31,6 +32,7 @@ interface Borrower {
   address_zip: string | null;
   ssn_encrypted: string | null;
   ssn_last4: string | null;
+  credit_consent: boolean | null;
   created_at: string;
 }
 
@@ -108,7 +110,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function BrokerBorrowerDetailPage() {
   const { borrowerId } = useParams<{ borrowerId: string }>();
-  const { user } = useAuth();
+  const { user, userAccount } = useAuth();
   const [borrower, setBorrower] = useState<Borrower | null>(null);
   const [coBorrowers, setCoBorrowers] = useState<CoBorrower[]>([]);
   const [documents, setDocuments] = useState<UploadedDoc[]>([]);
@@ -136,6 +138,30 @@ export function BrokerBorrowerDetailPage() {
   const [financialProfileLiquidity, setFinancialProfileLiquidity] = useState<number | null>(null);
   const [generatingStatements, setGeneratingStatements] = useState(false);
   const [statementMenuOpen, setStatementMenuOpen] = useState<'header' | 'docs' | null>(null);
+  const [pullingCredit, setPullingCredit] = useState(false);
+  const [creditPullResult, setCreditPullResult] = useState<{ equifax: number | null; experian: number | null; transunion: number | null; mid_score: number | null } | null>(null);
+  const [creditPullError, setCreditPullError] = useState<string | null>(null);
+
+  const handlePullCredit = async () => {
+    if (!borrower) return;
+    setPullingCredit(true);
+    setCreditPullError(null);
+    setCreditPullResult(null);
+    try {
+      const res = await pullCreditForBorrower(borrower.id);
+      setCreditPullResult({
+        equifax: res.equifax,
+        experian: res.experian,
+        transunion: res.transunion,
+        mid_score: res.mid_score,
+      });
+      await loadData();
+    } catch (err) {
+      setCreditPullError(err instanceof Error ? err.message : 'Failed to pull credit');
+    } finally {
+      setPullingCredit(false);
+    }
+  };
 
   const toggleSSN = (id: string) => {
     setRevealedSSNs(prev => {
@@ -736,6 +762,64 @@ export function BrokerBorrowerDetailPage() {
               </div>
             ))}
           </div>
+
+          {/* Pull Credit (ISC) */}
+          {(() => {
+            const iscConnected = !!userAccount?.isc_username;
+            const consentGiven = !!borrower.credit_consent;
+            const disabled = pullingCredit || !iscConnected || !consentGiven;
+            const tooltip = !iscConnected
+              ? 'Add your ISC credentials in Settings before pulling credit'
+              : !consentGiven
+                ? 'Borrower has not given credit consent'
+                : 'Soft-pull credit via ISC Credit Bureau';
+            return (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Pull Credit</p>
+                    <p className="text-xs text-gray-500">Soft pull via ISC Credit Bureau (no impact on borrower's score)</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePullCredit}
+                    disabled={disabled}
+                    title={tooltip}
+                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {pullingCredit ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    {pullingCredit ? 'Pulling…' : 'Pull Credit'}
+                  </button>
+                </div>
+                {!iscConnected && (
+                  <p className="text-xs text-amber-700 mt-2">
+                    No ISC credentials saved. <Link to="/internal/settings" className="underline font-medium">Add them in Settings</Link>.
+                  </p>
+                )}
+                {!consentGiven && iscConnected && (
+                  <p className="text-xs text-amber-700 mt-2">Borrower has not given credit consent on their application.</p>
+                )}
+                {creditPullError && (
+                  <p className="text-xs text-red-600 mt-2">{creditPullError}</p>
+                )}
+                {creditPullResult && (
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    {[
+                      ['Equifax', creditPullResult.equifax],
+                      ['Experian', creditPullResult.experian],
+                      ['TransUnion', creditPullResult.transunion],
+                      ['Mid Score', creditPullResult.mid_score],
+                    ].map(([label, val]) => (
+                      <div key={label as string} className="bg-purple-50 border border-purple-100 rounded-lg px-3 py-2">
+                        <p className="text-gray-500 uppercase text-[10px]">{label}</p>
+                        <p className="text-gray-900 font-semibold text-base">{val == null ? '—' : val}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {/* Residential Address */}
           <div className="mt-4 pt-4 border-t border-gray-100">
             <label className="text-xs font-medium text-gray-500 uppercase mb-2 block">Residential Address</label>
