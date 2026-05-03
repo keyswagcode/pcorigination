@@ -34,7 +34,6 @@ export function BrokerSettingsPage() {
   const { user, userAccount, refreshUserAccount } = useAuth();
   const [posSlug, setPosSlug] = useState('');
   const [originalSlug, setOriginalSlug] = useState('');
-  const [webhookUrl, setWebhookUrl] = useState('');
   const [orgId, setOrgId] = useState<string | null>(null);
   const [orgName, setOrgName] = useState('');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -157,15 +156,14 @@ export function BrokerSettingsPage() {
       // Load org data
       const { data: orgMember } = await supabase
         .from('organization_members')
-        .select('organization_id, organizations(id, name, zapier_webhook_url, logo_url)')
+        .select('organization_id, organizations(id, name, logo_url)')
         .eq('user_id', user.id)
         .maybeSingle();
 
       if (orgMember?.organizations) {
-        const org = orgMember.organizations as { id: string; name: string; zapier_webhook_url: string | null; logo_url: string | null };
+        const org = orgMember.organizations as { id: string; name: string; logo_url: string | null };
         setOrgId(org.id);
         setOrgName(org.name || '');
-        setWebhookUrl(org.zapier_webhook_url || '');
         setLogoUrl(org.logo_url || null);
 
         // Load team members
@@ -338,15 +336,6 @@ export function BrokerSettingsPage() {
     setOriginalSlug(posSlug);
     await refreshUserAccount();
     setSuccess('POS link updated successfully');
-    setTimeout(() => setSuccess(null), 3000);
-    setSaving(false);
-  };
-
-  const handleSaveWebhook = async () => {
-    if (!orgId) return;
-    setSaving(true);
-    await supabase.from('organizations').update({ zapier_webhook_url: webhookUrl || null }).eq('id', orgId);
-    setSuccess('Webhook URL updated');
     setTimeout(() => setSuccess(null), 3000);
     setSaving(false);
   };
@@ -590,32 +579,6 @@ export function BrokerSettingsPage() {
         </div>
       </div>
 
-      {/* Zapier Webhook */}
-      <div className="border border-gray-200 rounded-xl bg-white p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <svg className="w-5 h-5 text-orange-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 4.5l3.5 7h-7l3.5-7zm0 15l-3.5-7h7l-3.5 7z"/></svg>
-          <h2 className="text-lg font-semibold text-gray-900">Zapier Webhook</h2>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Webhook URL</label>
-            <div className="flex gap-2">
-              <input
-                type="url"
-                value={webhookUrl}
-                onChange={e => setWebhookUrl(e.target.value)}
-                className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
-                placeholder="https://hooks.zapier.com/hooks/catch/..."
-              />
-              <button onClick={handleSaveWebhook} disabled={saving}
-                className="flex items-center gap-1.5 px-4 py-2.5 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
-                <Save className="w-4 h-4" /> Save
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mt-2">Events fired: new borrower, doc upload, liquidity verified, pre-approval, loan submitted, loan approved/declined</p>
-          </div>
-        </div>
-      </div>
 
       {/* Team Management */}
       <div className="border border-gray-200 rounded-xl bg-white p-6">

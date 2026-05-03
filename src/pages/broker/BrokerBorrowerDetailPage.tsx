@@ -375,29 +375,6 @@ export function BrokerBorrowerDetailPage() {
             data: { borrower_id: borrower.id, note_content: noteText },
           });
 
-          // Fire webhook for email
-          try {
-            const { data: orgMember } = await supabase
-              .from('organization_members')
-              .select('organizations(zapier_webhook_url)')
-              .eq('user_id', user.id)
-              .maybeSingle();
-            const webhookUrl = (orgMember?.organizations as { zapier_webhook_url?: string })?.zapier_webhook_url;
-            if (webhookUrl) {
-              fetch(webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  event_type: 'note_mention',
-                  timestamp: new Date().toISOString(),
-                  mentioned_user: { name: mentioned.name, email: mentioned.email },
-                  author: authorName,
-                  borrower: { id: borrower.id, name: borrower.borrower_name },
-                  note: noteText,
-                }),
-              }).catch(() => {});
-            }
-          } catch { /* best effort */ }
         }
       }
     }

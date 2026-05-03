@@ -112,11 +112,11 @@ serve(async (req) => {
 
     const { data: brokerOrgMember } = await serviceClient
       .from('organization_members')
-      .select('organization_id, organizations(name, zapier_webhook_url)')
+      .select('organization_id, organizations(name)')
       .eq('user_id', broker_id)
       .maybeSingle()
 
-    const org = brokerOrgMember?.organizations as { name?: string; zapier_webhook_url?: string | null } | null
+    const org = brokerOrgMember?.organizations as { name?: string } | null
     const orgName = org?.name || 'Key Real Estate Capital'
 
     // Build recipient list: broker + org owner + anyone with notify_new_apps=true
@@ -176,21 +176,6 @@ serve(async (req) => {
       }
     }
 
-    // Fire Zapier webhook (best-effort)
-    if (org?.zapier_webhook_url) {
-      fetch(org.zapier_webhook_url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event_type: 'new_borrower',
-          timestamp: new Date().toISOString(),
-          borrower: { name: borrower_name, email: borrower_email, phone: borrower_phone || null },
-          broker: { name: brokerName, email: broker?.email },
-          alert_recipients: Array.from(recipientEmails),
-          organization: orgName,
-        }),
-      }).catch(() => {})
-    }
 
     return new Response(JSON.stringify({
       ok: true,

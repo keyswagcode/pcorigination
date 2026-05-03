@@ -142,28 +142,6 @@ export function BrokerLoanReviewPage() {
       details: `Loan amount: $${loan.loan_amount?.toLocaleString() || 0}. ${tasks.length} tasks created.`,
     });
 
-    // Fire webhook (best effort)
-    try {
-      const { data: orgData } = await supabase
-        .from('organization_members')
-        .select('organizations(zapier_webhook_url)')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      const webhookUrl = (orgData?.organizations as { zapier_webhook_url?: string })?.zapier_webhook_url;
-      if (webhookUrl) {
-        fetch(webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            event_type: 'loan_approved',
-            timestamp: new Date().toISOString(),
-            borrower: { id: loan.borrower_id, name: borrower?.borrower_name, email: borrower?.email },
-            loan: { id: loan.id, type: loan.loan_type, amount: loan.loan_amount, purpose: loan.loan_purpose },
-          }),
-        }).catch(() => {});
-      }
-    } catch { /* webhook is best-effort */ }
-
     navigate(`/internal/my-borrowers/${loan.borrower_id}`);
   };
 
@@ -181,29 +159,6 @@ export function BrokerLoanReviewPage() {
       title: `Loan declined: ${loan.scenario_name}`,
       details: declineNotes || 'No reason provided',
     });
-
-    // Fire webhook
-    try {
-      const { data: orgData } = await supabase
-        .from('organization_members')
-        .select('organizations(zapier_webhook_url)')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      const webhookUrl = (orgData?.organizations as { zapier_webhook_url?: string })?.zapier_webhook_url;
-      if (webhookUrl) {
-        fetch(webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            event_type: 'loan_declined',
-            timestamp: new Date().toISOString(),
-            borrower: { id: loan.borrower_id, name: borrower?.borrower_name, email: borrower?.email },
-            loan: { id: loan.id, type: loan.loan_type, amount: loan.loan_amount },
-            reason: declineNotes,
-          }),
-        }).catch(() => {});
-      }
-    } catch { /* best-effort */ }
 
     navigate(`/internal/my-borrowers/${loan.borrower_id}`);
   };
