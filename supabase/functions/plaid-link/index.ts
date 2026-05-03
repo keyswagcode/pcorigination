@@ -179,7 +179,7 @@ serve(async (req) => {
           client_name: 'Key Real Estate Capital',
           products: ['cra_base_report'],
           consumer_report_permissible_purpose: 'WRITTEN_INSTRUCTION_PREQUALIFICATION',
-          cra_options: { days_requested: 90 },
+          cra_options: { days_requested: 365 },
           country_codes: ['US'],
           language: 'en',
           webhook: PLAID_WEBHOOK_URL,
@@ -258,11 +258,57 @@ serve(async (req) => {
             },
           }, { onConflict: 'borrower_id' })
 
+          if (totalLiquidity > 0) {
+            await serviceClient.from('pre_approvals').delete().eq('borrower_id', borrower.id)
+            await serviceClient.from('pre_approvals').insert([
+              {
+                borrower_id: borrower.id,
+                loan_type: 'dscr',
+                status: 'approved',
+                sub_status: 'pre_approved',
+                prequalified_amount: totalLiquidity * 4,
+                qualification_max: totalLiquidity * 4,
+                verified_liquidity: totalLiquidity,
+                passes_liquidity_check: true,
+                summary: `DSCR Loan Pre-Approval: Up to $${(totalLiquidity * 4).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (4x multiplier)`,
+                machine_decision: 'approved',
+                machine_confidence: 95,
+              },
+              {
+                borrower_id: borrower.id,
+                loan_type: 'fix_flip',
+                status: 'approved',
+                sub_status: 'pre_approved',
+                prequalified_amount: totalLiquidity * 10,
+                qualification_max: totalLiquidity * 10,
+                verified_liquidity: totalLiquidity,
+                passes_liquidity_check: true,
+                summary: `Fix & Flip Pre-Approval: Up to $${(totalLiquidity * 10).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (10x multiplier)`,
+                machine_decision: 'approved',
+                machine_confidence: 95,
+              },
+              {
+                borrower_id: borrower.id,
+                loan_type: 'bridge',
+                status: 'approved',
+                sub_status: 'pre_approved',
+                prequalified_amount: totalLiquidity * 5,
+                qualification_max: totalLiquidity * 5,
+                verified_liquidity: totalLiquidity,
+                passes_liquidity_check: true,
+                summary: `Bridge Loan Pre-Approval: Up to $${(totalLiquidity * 5).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (5x multiplier)`,
+                machine_decision: 'approved',
+                machine_confidence: 95,
+              },
+            ])
+          }
+
           await serviceClient
             .from('borrowers')
             .update({
               plaid_report_status: 'ready',
-              lifecycle_stage: 'liquidity_verified',
+              lifecycle_stage: totalLiquidity > 0 ? 'pre_approved' : 'liquidity_verified',
+              borrower_status: totalLiquidity > 0 ? 'prequalified' : undefined,
             })
             .eq('id', borrower.id)
 
