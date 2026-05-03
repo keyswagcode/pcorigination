@@ -113,6 +113,9 @@ serve(async (req) => {
     const report = reportData.report || reportData
     const totalLiquidity = extractLiquidity(report)
 
+    // Step 1: persist the financial profile + flip status to ready FIRST so
+    // a pre_approvals insert failure can't keep the borrower stuck in
+    // 'pending'.
     await serviceClient.from('borrower_financial_profiles').upsert({
       borrower_id: borrower.id,
       liquidity_estimate: totalLiquidity,
@@ -126,61 +129,64 @@ serve(async (req) => {
       },
     }, { onConflict: 'borrower_id' })
 
-    // Auto-generate pre-approvals so the borrower moves to the
-    // Pre-Approved column regardless of whether their tab is still open.
-    if (totalLiquidity > 0) {
-      await serviceClient.from('pre_approvals').delete().eq('borrower_id', borrower.id)
-      await serviceClient.from('pre_approvals').insert([
-        {
-          borrower_id: borrower.id,
-          loan_type: 'dscr',
-          status: 'approved',
-          sub_status: 'pre_approved',
-          prequalified_amount: totalLiquidity * 4,
-          qualification_max: totalLiquidity * 4,
-          verified_liquidity: totalLiquidity,
-          passes_liquidity_check: true,
-          summary: `DSCR Loan Pre-Approval: Up to $${(totalLiquidity * 4).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (4x multiplier)`,
-          machine_decision: 'approved',
-          machine_confidence: 95,
-        },
-        {
-          borrower_id: borrower.id,
-          loan_type: 'fix_flip',
-          status: 'approved',
-          sub_status: 'pre_approved',
-          prequalified_amount: totalLiquidity * 10,
-          qualification_max: totalLiquidity * 10,
-          verified_liquidity: totalLiquidity,
-          passes_liquidity_check: true,
-          summary: `Fix & Flip Pre-Approval: Up to $${(totalLiquidity * 10).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (10x multiplier)`,
-          machine_decision: 'approved',
-          machine_confidence: 95,
-        },
-        {
-          borrower_id: borrower.id,
-          loan_type: 'bridge',
-          status: 'approved',
-          sub_status: 'pre_approved',
-          prequalified_amount: totalLiquidity * 5,
-          qualification_max: totalLiquidity * 5,
-          verified_liquidity: totalLiquidity,
-          passes_liquidity_check: true,
-          summary: `Bridge Loan Pre-Approval: Up to $${(totalLiquidity * 5).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (5x multiplier)`,
-          machine_decision: 'approved',
-          machine_confidence: 95,
-        },
-      ])
-    }
-
     await serviceClient
       .from('borrowers')
       .update({
         plaid_report_status: 'ready',
         lifecycle_stage: totalLiquidity > 0 ? 'pre_approved' : 'liquidity_verified',
-        borrower_status: totalLiquidity > 0 ? 'prequalified' : undefined,
+        ...(totalLiquidity > 0 ? { borrower_status: 'prequalified' } : {}),
       })
       .eq('id', borrower.id)
+
+    // Step 2: best-effort pre-approval generation.
+    if (totalLiquidity > 0) {
+      try {
+        await serviceClient.from('pre_approvals').delete().eq('borrower_id', borrower.id)
+        await serviceClient.from('pre_approvals').insert([
+          {
+            borrower_id: borrower.id,
+            loan_type: 'dscr',
+            status: 'approved',
+            sub_status: 'pre_approved',
+            prequalified_amount: totalLiquidity * 4,
+            qualification_max: totalLiquidity * 4,
+            verified_liquidity: totalLiquidity,
+            passes_liquidity_check: true,
+            summary: `DSCR Loan Pre-Approval: Up to $${(totalLiquidity * 4).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (4x multiplier)`,
+            machine_decision: 'approved',
+            machine_confidence: 95,
+          },
+          {
+            borrower_id: borrower.id,
+            loan_type: 'fix_flip',
+            status: 'approved',
+            sub_status: 'pre_approved',
+            prequalified_amount: totalLiquidity * 10,
+            qualification_max: totalLiquidity * 10,
+            verified_liquidity: totalLiquidity,
+            passes_liquidity_check: true,
+            summary: `Fix & Flip Pre-Approval: Up to $${(totalLiquidity * 10).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (10x multiplier)`,
+            machine_decision: 'approved',
+            machine_confidence: 95,
+          },
+          {
+            borrower_id: borrower.id,
+            loan_type: 'bridge',
+            status: 'approved',
+            sub_status: 'pre_approved',
+            prequalified_amount: totalLiquidity * 5,
+            qualification_max: totalLiquidity * 5,
+            verified_liquidity: totalLiquidity,
+            passes_liquidity_check: true,
+            summary: `Bridge Loan Pre-Approval: Up to $${(totalLiquidity * 5).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (5x multiplier)`,
+            machine_decision: 'approved',
+            machine_confidence: 95,
+          },
+        ])
+      } catch (paErr) {
+        console.warn('Auto pre_approval insert failed (status still ready):', (paErr as Error).message)
+      }
+    }
 
     return new Response(JSON.stringify({ ok: true }), {
       headers: { 'Content-Type': 'application/json' },
