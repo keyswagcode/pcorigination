@@ -6,7 +6,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const GHL_API = 'https://rest.gohighlevel.com/v1'
+const GHL_API = 'https://services.leadconnectorhq.com'
+const GHL_VERSION = '2021-07-28'
 
 async function ghlRequest(method: string, path: string, body?: Record<string, unknown>) {
   const apiKey = Deno.env.get('GHL_API_KEY')
@@ -16,6 +17,8 @@ async function ghlRequest(method: string, path: string, body?: Record<string, un
     method,
     headers: {
       'Authorization': `Bearer ${apiKey}`,
+      'Version': GHL_VERSION,
+      'Accept': 'application/json',
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -28,11 +31,10 @@ async function ghlRequest(method: string, path: string, body?: Record<string, un
 
 interface GhlUser { id?: string; email?: string }
 interface GhlUsersResponse { users?: GhlUser[] }
-interface GhlContact { id?: string; contact?: { id?: string } }
 
-async function findGhlUserIdByEmail(email: string): Promise<string | null> {
+async function findGhlUserIdByEmail(locationId: string, email: string): Promise<string | null> {
   if (!email) return null
-  const { ok, data } = await ghlRequest('GET', `/users/?email=${encodeURIComponent(email)}`)
+  const { ok, data } = await ghlRequest('GET', `/users/?locationId=${encodeURIComponent(locationId)}`)
   if (!ok || !data) return null
   const list = (data as GhlUsersResponse).users || []
   for (const u of list) {
@@ -42,6 +44,7 @@ async function findGhlUserIdByEmail(email: string): Promise<string | null> {
 }
 
 interface UpsertParams {
+  locationId: string
   email: string
   firstName: string
   lastName: string
@@ -51,54 +54,43 @@ interface UpsertParams {
   tags: string[]
 }
 
-async function upsertContact(params: UpsertParams): Promise<{ contactId: string | null; created: boolean; error?: string }> {
-  // Build contact body. GHL v1 uses field names firstName/lastName/email/phone/address1/city/state/postalCode.
+interface UpsertResult { contactId: string | null; created: boolean; error?: string }
+
+async function upsertContact(params: UpsertParams): Promise<UpsertResult> {
   const body: Record<string, unknown> = {
+    locationId: params.locationId,
     email: params.email,
     firstName: params.firstName || undefined,
     lastName: params.lastName || undefined,
+    name: [params.firstName, params.lastName].filter(Boolean).join(' ') || undefined,
     phone: params.phone || undefined,
     address1: params.address.street || undefined,
     city: params.address.city || undefined,
     state: params.address.state || undefined,
     postalCode: params.address.postalCode || undefined,
-    tags: params.tags,
+    tags: params.tags.length > 0 ? params.tags : undefined,
   }
   if (params.assignedTo) body.assignedTo = params.assignedTo
 
-  // Try create first.
-  const create = await ghlRequest('POST', '/contacts/', body)
-  if (create.ok) {
-    const c = create.data as GhlContact
-    return { contactId: c?.id || c?.contact?.id || null, created: true }
+  // v2 upsert handles both create and update via single endpoint.
+  const upsert = await ghlRequest('POST', '/contacts/upsert', body)
+  if (upsert.ok && upsert.data) {
+    const data = upsert.data as Record<string, unknown>
+    const contact = (data.contact as Record<string, unknown> | undefined) || data
+    const id = (contact?.id as string | undefined) || (data.contactId as string | undefined) || null
+    const newRecord = (data.new as boolean | undefined) ?? true
+    return { contactId: id, created: !!newRecord }
   }
 
-  // 409 means contact already exists — pull the id from the response or look it up.
-  if (create.status === 409 || create.status === 422 || create.status === 400) {
-    const existingId = (create.data as Record<string, unknown> | null)?.contactId as string | undefined
-      || ((create.data as Record<string, unknown> | null)?.contact as Record<string, unknown> | undefined)?.id as string | undefined
-      || null
-
-    let id = existingId
-    if (!id) {
-      // Look up by email
-      const lookup = await ghlRequest('GET', `/contacts/?query=${encodeURIComponent(params.email)}&limit=10`)
-      const list = ((lookup.data as Record<string, unknown> | null)?.contacts as Array<{ id?: string; email?: string }>) || []
-      const match = list.find(c => c.email && c.email.toLowerCase() === params.email.toLowerCase())
-      id = match?.id || null
-    }
-    if (!id) return { contactId: null, created: false, error: `Contact upsert failed: ${create.status} ${create.raw.slice(0, 200)}` }
-
-    // Update existing contact
-    await ghlRequest('PUT', `/contacts/${id}`, body)
-    return { contactId: id, created: false }
+  return {
+    contactId: null,
+    created: false,
+    error: `GHL upsert ${upsert.status}: ${upsert.raw.slice(0, 300)}`,
   }
-
-  return { contactId: null, created: false, error: `Contact create failed: ${create.status} ${create.raw.slice(0, 200)}` }
 }
 
 async function addTags(contactId: string, tags: string[]): Promise<void> {
-  await ghlRequest('POST', `/contacts/${contactId}/tags/`, { tags })
+  await ghlRequest('POST', `/contacts/${contactId}/tags`, { tags })
 }
 
 serve(async (req) => {
@@ -123,6 +115,13 @@ serve(async (req) => {
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const locationId = Deno.env.get('GHL_LOCATION_ID') || ''
+    if (!locationId) {
+      return new Response(JSON.stringify({ error: 'GHL_LOCATION_ID not configured' }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
@@ -167,7 +166,7 @@ serve(async (req) => {
       brokerEmail = broker?.email || null
     }
 
-    const ghlUserId = brokerEmail ? await findGhlUserIdByEmail(brokerEmail) : null
+    const ghlUserId = brokerEmail ? await findGhlUserIdByEmail(locationId, brokerEmail) : null
 
     const nameParts = (borrower.borrower_name || '').trim().split(/\s+/)
     const firstName = nameParts[0] || ''
@@ -180,6 +179,7 @@ serve(async (req) => {
 
     try {
       const upsert = await upsertContact({
+        locationId,
         email: borrower.email,
         firstName,
         lastName,
@@ -196,10 +196,9 @@ serve(async (req) => {
 
       if (!upsert.contactId) throw new Error(upsert.error || 'GHL upsert returned no contact id')
 
-      // Tags array on create/update sets them, but call addTags for safety on existing-update path.
-      if (!upsert.created) {
-        await addTags(upsert.contactId, [tag])
-      }
+      // Belt-and-suspenders: also call the tags endpoint so existing contacts
+      // pick up the tag even if the upsert request didn't apply it.
+      await addTags(upsert.contactId, [tag])
 
       await serviceClient.from('borrower_activity_log').insert({
         borrower_id,
@@ -226,7 +225,6 @@ serve(async (req) => {
         details: msg,
       })
       return new Response(JSON.stringify({ ok: false, error: msg }), {
-        // Return 200 so the borrower flow doesn't block on a CRM failure.
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
