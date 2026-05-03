@@ -52,6 +52,7 @@ interface LoanPending {
 }
 
 const STAGE_LABELS: Record<string, string> = {
+  on_hold: 'On Hold',
   profile_created: 'New',
   loan_type_selected: 'Loan Type Selected',
   documents_uploaded: 'Docs Uploaded',
@@ -62,6 +63,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const STAGE_COLORS: Record<string, string> = {
+  on_hold: 'bg-gray-200 text-gray-700',
   profile_created: 'bg-gray-100 text-gray-600',
   documents_uploaded: 'bg-blue-100 text-blue-700',
   liquidity_verified: 'bg-cyan-100 text-cyan-700',
@@ -70,6 +72,7 @@ const STAGE_COLORS: Record<string, string> = {
 };
 
 const PIPELINE_STAGES = [
+  { key: 'on_hold', label: 'On Hold' },
   { key: 'profile_created', label: 'New' },
   { key: 'pre_approved', label: 'Pre-Approved' },
   { key: 'order_appraisal', label: 'Order Appraisal' },
@@ -349,10 +352,16 @@ export function BrokerDashboardPage() {
             </div>
           )}
         </div>
-        <div className="grid grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
           {PIPELINE_STAGES.map(stage => {
             const count = pipelineCounts[stage.key];
-            const stageBorrowers = filteredBorrowers.filter(b => (b.lifecycle_stage || 'profile_created') === stage.key);
+            const stageBorrowers = filteredBorrowers
+              .filter(b => (b.lifecycle_stage || 'profile_created') === stage.key)
+              .sort((a, b) => {
+                const aPending = pendingPreApprovalIds.has(a.id) ? 1 : 0;
+                const bPending = pendingPreApprovalIds.has(b.id) ? 1 : 0;
+                return bPending - aPending;
+              });
             const isOver = dragOverStage === stage.key;
 
             return (
@@ -519,7 +528,13 @@ export function BrokerDashboardPage() {
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-3">New Borrowers</h2>
         {(() => {
-          const newBorrowers = filteredBorrowers.filter(b => (b.lifecycle_stage || 'profile_created') === 'profile_created');
+          const newBorrowers = filteredBorrowers
+            .filter(b => (b.lifecycle_stage || 'profile_created') === 'profile_created')
+            .sort((a, b) => {
+              const aPending = pendingPreApprovalIds.has(a.id) ? 1 : 0;
+              const bPending = pendingPreApprovalIds.has(b.id) ? 1 : 0;
+              return bPending - aPending;
+            });
           return newBorrowers.length === 0 ? (
             <div className="border border-gray-200 rounded-xl bg-white p-8 text-center">
               <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />

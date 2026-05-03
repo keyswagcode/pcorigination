@@ -335,62 +335,17 @@ export function BorrowerHomePage() {
         },
       }, { onConflict: 'borrower_id' });
 
-      // Generate pre-approvals
-      const dscrAmount = totalLiquidity * 4;
-      const fixFlipAmount = totalLiquidity * 10;
-      const bridgeAmount = totalLiquidity * 5;
-
-      await supabase.from('pre_approvals').delete().eq('borrower_id', borrower.id);
-      await supabase.from('pre_approvals').insert([
-        {
-          borrower_id: borrower.id,
-          loan_type: 'dscr',
-          status: 'approved',
-          sub_status: 'pre_approved',
-          prequalified_amount: dscrAmount,
-          qualification_max: dscrAmount,
-          verified_liquidity: totalLiquidity,
-          passes_liquidity_check: true,
-          summary: `DSCR Loan Pre-Approval: Up to $${dscrAmount.toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity`,
-          machine_decision: 'approved',
-          machine_confidence: Math.round(avgConfidence * 100),
-        },
-        {
-          borrower_id: borrower.id,
-          loan_type: 'fix_flip',
-          status: 'approved',
-          sub_status: 'pre_approved',
-          prequalified_amount: fixFlipAmount,
-          qualification_max: fixFlipAmount,
-          verified_liquidity: totalLiquidity,
-          passes_liquidity_check: true,
-          summary: `Fix & Flip Pre-Approval: Up to $${fixFlipAmount.toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity`,
-          machine_decision: 'approved',
-          machine_confidence: Math.round(avgConfidence * 100),
-        },
-        {
-          borrower_id: borrower.id,
-          loan_type: 'bridge',
-          status: 'approved',
-          sub_status: 'pre_approved',
-          prequalified_amount: bridgeAmount,
-          qualification_max: bridgeAmount,
-          verified_liquidity: totalLiquidity,
-          passes_liquidity_check: true,
-          summary: `Bridge Loan Pre-Approval: Up to $${bridgeAmount.toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity`,
-          machine_decision: 'approved',
-          machine_confidence: Math.round(avgConfidence * 100),
-        },
-      ]);
-
+      // Manual-upload borrowers do NOT get auto-generated pre-approvals.
+      // The broker reviews the extracted statements and finalizes a
+      // pre-approval manually. The dashboard surfaces these with a
+      // "Pending Pre-approval" badge.
       await supabase.from('borrowers')
-        .update({ lifecycle_stage: 'pre_approved', borrower_status: 'prequalified' })
+        .update({ borrower_status: 'submitted' })
         .eq('id', borrower.id);
 
       setUploadSuccess(
-        `Verified! Found $${totalLiquidity.toLocaleString()} in liquidity across ${accounts.length} account(s). ` +
-        `Pre-approvals generated: DSCR up to $${dscrAmount.toLocaleString()}, ` +
-        `Fix & Flip / Bridge up to $${fixFlipAmount.toLocaleString()}.`
+        `Got it! We extracted $${totalLiquidity.toLocaleString()} in liquidity across ${accounts.length} account(s). ` +
+        `Your broker will review your statements and follow up shortly with your pre-approval.`
       );
 
       await loadData();
