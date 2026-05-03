@@ -36,6 +36,8 @@ interface BorrowerSummary {
   lifecycle_stage: string | null;
   borrower_status: string | null;
   created_at: string;
+  broker_id: string | null;
+  owner_name?: string;
 }
 
 interface LoanPending {
@@ -83,6 +85,7 @@ export function BrokerDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [search, setSearch] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState<string>('all');
   const [dragBorrowerId, setDragBorrowerId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
 
@@ -96,7 +99,7 @@ export function BrokerDashboardPage() {
 
       let borrowersQuery = supabase
         .from('borrowers')
-        .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at')
+        .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at, broker_id')
         .order('created_at', { ascending: false });
 
       if (!isAdminLike) {
@@ -106,7 +109,25 @@ export function BrokerDashboardPage() {
       }
 
       const { data: borrowerData } = await borrowersQuery;
-      setBorrowers(borrowerData || []);
+      const rows = (borrowerData || []) as BorrowerSummary[];
+
+      // Decorate each borrower with the owner's display name
+      const brokerIds = Array.from(new Set(rows.map(b => b.broker_id).filter(Boolean) as string[]));
+      if (brokerIds.length > 0) {
+        const { data: brokers } = await supabase
+          .from('user_accounts')
+          .select('id, first_name, last_name, email')
+          .in('id', brokerIds);
+        const byId = new Map((brokers || []).map(b => [b.id, b]));
+        for (const r of rows) {
+          const b = r.broker_id ? byId.get(r.broker_id) : undefined;
+          r.owner_name = b
+            ? [b.first_name, b.last_name].filter(Boolean).join(' ') || b.email || 'Owner'
+            : undefined;
+        }
+      }
+
+      setBorrowers(rows);
 
       // Fetch pending loans
       if (borrowerData && borrowerData.length > 0) {
@@ -182,10 +203,28 @@ export function BrokerDashboardPage() {
     }
   };
 
+  const filteredBorrowers = ownerFilter === 'all'
+    ? borrowers
+    : ownerFilter === 'unassigned'
+      ? borrowers.filter(b => !b.broker_id)
+      : borrowers.filter(b => b.broker_id === ownerFilter);
+
+  const ownerOptions = (() => {
+    const seen = new Map<string, string>();
+    for (const b of borrowers) {
+      if (b.broker_id && b.owner_name && !seen.has(b.broker_id)) {
+        seen.set(b.broker_id, b.owner_name);
+      }
+    }
+    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  })();
+
+  const hasUnassigned = borrowers.some(b => !b.broker_id);
+
   const getPipelineCounts = () => {
     const counts: Record<string, number> = {};
     for (const stage of PIPELINE_STAGES) counts[stage.key] = 0;
-    for (const b of borrowers) {
+    for (const b of filteredBorrowers) {
       const stage = b.lifecycle_stage || 'profile_created';
       if (counts[stage] !== undefined) counts[stage]++;
     }
@@ -255,11 +294,43 @@ export function BrokerDashboardPage() {
 
       {/* Pipeline Kanban - Drag & Drop */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">Pipeline</h2>
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <h2 className="text-lg font-semibold text-gray-900">Pipeline</h2>
+          {(ownerOptions.length > 0 || hasUnassigned) && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-gray-500 uppercase">Owner</label>
+              <select
+                value={ownerFilter}
+                onChange={e => setOwnerFilter(e.target.value)}
+                className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
+              >
+                <option value="all">All owners ({borrowers.length})</option>
+                {hasUnassigned && (
+                  <option value="unassigned">
+                    Unassigned ({borrowers.filter(b => !b.broker_id).length})
+                  </option>
+                )}
+                {ownerOptions.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name} ({borrowers.filter(b => b.broker_id === id).length})
+                  </option>
+                ))}
+              </select>
+              {ownerFilter !== 'all' && (
+                <button
+                  onClick={() => setOwnerFilter('all')}
+                  className="text-xs text-gray-500 hover:text-gray-700"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         <div className="grid grid-cols-6 gap-3">
           {PIPELINE_STAGES.map(stage => {
             const count = pipelineCounts[stage.key];
-            const stageBorrowers = borrowers.filter(b => (b.lifecycle_stage || 'profile_created') === stage.key);
+            const stageBorrowers = filteredBorrowers.filter(b => (b.lifecycle_stage || 'profile_created') === stage.key);
             const isOver = dragOverStage === stage.key;
 
             return (
@@ -352,7 +423,7 @@ export function BrokerDashboardPage() {
 
         {search && (() => {
           const q = search.toLowerCase();
-          const results = borrowers.filter(b =>
+          const results = filteredBorrowers.filter(b =>
             b.borrower_name.toLowerCase().includes(q) ||
             (b.email || '').toLowerCase().includes(q) ||
             (b.credit_score && String(b.credit_score).includes(q))
@@ -410,7 +481,7 @@ export function BrokerDashboardPage() {
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-3">New Borrowers</h2>
         {(() => {
-          const newBorrowers = borrowers.filter(b => (b.lifecycle_stage || 'profile_created') === 'profile_created');
+          const newBorrowers = filteredBorrowers.filter(b => (b.lifecycle_stage || 'profile_created') === 'profile_created');
           return newBorrowers.length === 0 ? (
             <div className="border border-gray-200 rounded-xl bg-white p-8 text-center">
               <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
