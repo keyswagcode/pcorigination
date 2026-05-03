@@ -37,6 +37,7 @@ interface BorrowerSummary {
   borrower_status: string | null;
   created_at: string;
   broker_id: string | null;
+  plaid_user_id: string | null;
   owner_name?: string;
 }
 
@@ -82,6 +83,7 @@ export function BrokerDashboardPage() {
   const { member, members } = useTeam();
   const [borrowers, setBorrowers] = useState<BorrowerSummary[]>([]);
   const [pendingLoans, setPendingLoans] = useState<LoanPending[]>([]);
+  const [pendingPreApprovalIds, setPendingPreApprovalIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [search, setSearch] = useState('');
@@ -99,7 +101,7 @@ export function BrokerDashboardPage() {
 
       let borrowersQuery = supabase
         .from('borrowers')
-        .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at, broker_id')
+        .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at, broker_id, plaid_user_id')
         .order('created_at', { ascending: false });
 
       if (!isAdminLike) {
@@ -129,15 +131,25 @@ export function BrokerDashboardPage() {
 
       setBorrowers(rows);
 
-      // Fetch pending loans
+      // Fetch pending loans + figure out who needs manual pre-approval review
       if (borrowerData && borrowerData.length > 0) {
         const borrowerIds = borrowerData.map(b => b.id);
-        const { data: loans } = await supabase
-          .from('loan_scenarios')
-          .select('id, scenario_name, loan_type, loan_amount, status, borrower_id')
-          .in('borrower_id', borrowerIds)
-          .eq('status', 'submitted')
-          .order('created_at', { ascending: false });
+        const [{ data: loans }, { data: bankStmtRows }, { data: preApprovalRows }] = await Promise.all([
+          supabase
+            .from('loan_scenarios')
+            .select('id, scenario_name, loan_type, loan_amount, status, borrower_id')
+            .in('borrower_id', borrowerIds)
+            .eq('status', 'submitted')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('bank_statement_accounts')
+            .select('borrower_id')
+            .in('borrower_id', borrowerIds),
+          supabase
+            .from('pre_approvals')
+            .select('borrower_id')
+            .in('borrower_id', borrowerIds),
+        ]);
 
         if (loans) {
           const loansWithNames = loans.map(l => ({
@@ -146,6 +158,16 @@ export function BrokerDashboardPage() {
           }));
           setPendingLoans(loansWithNames);
         }
+
+        const hasBankStmt = new Set((bankStmtRows || []).map(r => r.borrower_id as string));
+        const hasPreApproval = new Set((preApprovalRows || []).map(r => r.borrower_id as string));
+        const pending = new Set<string>();
+        for (const b of rows) {
+          if (hasBankStmt.has(b.id) && !b.plaid_user_id && !hasPreApproval.has(b.id)) {
+            pending.add(b.id);
+          }
+        }
+        setPendingPreApprovalIds(pending);
       }
 
       setIsLoading(false);
@@ -387,6 +409,14 @@ export function BrokerDashboardPage() {
                       <Link to={`/internal/my-borrowers/${b.id}`} className="block relative" onClick={e => { if (dragBorrowerId) e.preventDefault(); }}>
                         <p className="text-sm font-medium text-gray-900 truncate pr-6">{b.borrower_name}</p>
                         <p className="text-xs text-gray-500 mt-0.5">{b.credit_score ? `${b.credit_score} CS` : 'No CS'}</p>
+                        {pendingPreApprovalIds.has(b.id) && (
+                          <span
+                            title="Borrower uploaded statements but skipped Plaid — needs manual pre-approval"
+                            className="inline-block mt-1 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded"
+                          >
+                            Pending Pre-approval
+                          </span>
+                        )}
                         {pendingLoanCountByBorrower[b.id] > 0 && (
                           <span
                             title={`${pendingLoanCountByBorrower[b.id]} pending loan${pendingLoanCountByBorrower[b.id] === 1 ? '' : 's'}`}
@@ -448,6 +478,14 @@ export function BrokerDashboardPage() {
                     <p className="text-xs text-gray-500">{b.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {pendingPreApprovalIds.has(b.id) && (
+                      <span
+                        title="Borrower uploaded statements but skipped Plaid — needs manual pre-approval"
+                        className="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded"
+                      >
+                        Pending Pre-approval
+                      </span>
+                    )}
                     {pendingLoanCountByBorrower[b.id] > 0 && (
                       <span
                         title={`${pendingLoanCountByBorrower[b.id]} pending loan${pendingLoanCountByBorrower[b.id] === 1 ? '' : 's'}`}
@@ -504,6 +542,14 @@ export function BrokerDashboardPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    {pendingPreApprovalIds.has(b.id) && (
+                      <span
+                        title="Borrower uploaded statements but skipped Plaid — needs manual pre-approval"
+                        className="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs font-semibold rounded"
+                      >
+                        Pending Pre-approval
+                      </span>
+                    )}
                     {pendingLoanCountByBorrower[b.id] > 0 && (
                       <span
                         title={`${pendingLoanCountByBorrower[b.id]} pending loan${pendingLoanCountByBorrower[b.id] === 1 ? '' : 's'}`}
