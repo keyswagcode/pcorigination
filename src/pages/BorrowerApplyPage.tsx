@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { ArrowRight, ArrowLeft, Eye, EyeOff, Building2, Shield } from 'lucide-react';
 import { sendNewApplicationAlert } from '../services/newAppAlertService';
+import { syncBorrowerToGhl } from '../services/ghlSyncService';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 
 type Step = 'credentials' | 'profile';
@@ -172,7 +173,7 @@ export function BorrowerApplyPage() {
       if (updateError) throw updateError;
 
       // Create borrower record
-      const { error: borrowerError } = await supabase.from('borrowers').insert({
+      const { data: insertedBorrower, error: borrowerError } = await supabase.from('borrowers').insert({
         user_id: userId,
         borrower_name: `${firstName} ${lastName}`.trim(),
         email,
@@ -191,7 +192,7 @@ export function BorrowerApplyPage() {
         credit_consent_at: creditConsent ? new Date().toISOString() : null,
         borrower_status: 'draft',
         lifecycle_stage: 'profile_created',
-      });
+      }).select('id').single();
       if (borrowerError) throw borrowerError;
 
       // Send new application alert to broker + org owner + opted-in team members
@@ -202,6 +203,11 @@ export function BorrowerApplyPage() {
           borrowerPhone: phone.replace(/\D/g, '') || null,
           brokerId: resolvedBrokerId,
         });
+      }
+
+      // Push to GoHighLevel — best-effort; CRM lag should not block the flow
+      if (insertedBorrower?.id) {
+        syncBorrowerToGhl(insertedBorrower.id);
       }
 
       navigate('/application', { replace: true });
