@@ -11,7 +11,7 @@ interface UserAccount {
   user_role: string | null;
   pos_slug: string | null;
   isc_username: string | null;
-  valora_username: string | null;
+  valora_username?: string | null;
 }
 
 interface AuthContextValue {
@@ -37,7 +37,7 @@ const AuthContext = createContext<AuthContextValue>({
 async function fetchUserAccount(authUserId: string): Promise<UserAccount | null> {
   const { data: account } = await supabase
     .from('user_accounts')
-    .select('id, first_name, last_name, email, user_role, pos_slug, isc_username, valora_username')
+    .select('id, first_name, last_name, email, user_role, pos_slug, isc_username')
     .eq('id', authUserId)
     .maybeSingle();
 
