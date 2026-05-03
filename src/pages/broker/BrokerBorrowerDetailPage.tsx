@@ -1377,7 +1377,7 @@ export function BrokerBorrowerDetailPage() {
                 <div className="flex items-center gap-4">
                   {loan.loan_amount && <p className="text-lg font-semibold text-gray-900">${loan.loan_amount.toLocaleString()}</p>}
                   <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[loan.status] || 'bg-gray-100 text-gray-600'}`}>{loan.status}</span>
-                  {loan.status === 'submitted' && (
+                  {loan.status !== 'draft' && (
                     <Link to={`/internal/loans/${loan.id}/review`} className="px-3 py-1.5 text-xs font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700">Review</Link>
                   )}
                 </div>
