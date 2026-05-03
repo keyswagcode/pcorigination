@@ -4,9 +4,10 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   ArrowLeft, CheckCircle2, XCircle, DollarSign, MapPin,
-  User, Loader2, Building2
+  User, Loader2, Building2, Home, X
 } from 'lucide-react';
 import { logAudit } from '../../services/auditService';
+import { orderAppraisal, type AppraisalClassification } from '../../services/valoraAppraisalService';
 
 interface LoanDetail {
   id: string;
@@ -59,7 +60,7 @@ const LOAN_TYPE_LABELS: Record<string, string> = { dscr: 'DSCR', fix_flip: 'Fix 
 
 export function BrokerLoanReviewPage() {
   const { loanId } = useParams<{ loanId: string }>();
-  const { user } = useAuth();
+  const { user, userAccount } = useAuth();
   const navigate = useNavigate();
   const [loan, setLoan] = useState<LoanDetail | null>(null);
   const [borrower, setBorrower] = useState<BorrowerSummary | null>(null);
@@ -68,6 +69,27 @@ export function BrokerLoanReviewPage() {
   const [processing, setProcessing] = useState(false);
   const [declineNotes, setDeclineNotes] = useState('');
   const [showDeclineForm, setShowDeclineForm] = useState(false);
+  const [showAppraisalModal, setShowAppraisalModal] = useState(false);
+  const [orderingAppraisal, setOrderingAppraisal] = useState(false);
+  const [appraisalError, setAppraisalError] = useState<string | null>(null);
+  const [appraisalResult, setAppraisalResult] = useState<{ classification: AppraisalClassification; orderId: string | null } | null>(null);
+
+  const valoraConnected = !!userAccount?.valora_username;
+
+  const handleOrderAppraisal = async () => {
+    if (!loan) return;
+    setOrderingAppraisal(true);
+    setAppraisalError(null);
+    setAppraisalResult(null);
+    try {
+      const res = await orderAppraisal(loan.id);
+      setAppraisalResult({ classification: res.classification, orderId: res.order_id });
+    } catch (err) {
+      setAppraisalError(err instanceof Error ? err.message : 'Failed to order appraisal');
+    } finally {
+      setOrderingAppraisal(false);
+    }
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -197,9 +219,18 @@ export function BrokerLoanReviewPage() {
         <ArrowLeft className="w-4 h-4" /> Back to Borrower
       </Link>
 
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Loan Review</h1>
-        <p className="text-gray-500 mt-1">{loan.scenario_name}</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">Loan Review</h1>
+          <p className="text-gray-500 mt-1">{loan.scenario_name}</p>
+        </div>
+        <button
+          onClick={() => { setAppraisalError(null); setAppraisalResult(null); setShowAppraisalModal(true); }}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+          title="Order appraisal from Valora AMC"
+        >
+          <Home className="w-4 h-4" /> Order Appraisal
+        </button>
       </div>
 
       {alreadyReviewed && (
@@ -280,6 +311,90 @@ export function BrokerLoanReviewPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Order Appraisal modal */}
+      {showAppraisalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Order Appraisal — Valora AMC</h3>
+                <p className="text-xs text-gray-500 mt-1">Loan info auto-fills the order. Review below before submitting.</p>
+              </div>
+              <button onClick={() => setShowAppraisalModal(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {!valoraConnected && (
+              <div className="px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg text-sm text-amber-800">
+                You haven't saved Valora credentials yet. <Link to="/internal/settings" className="underline font-medium">Add them in Settings</Link> before ordering.
+              </div>
+            )}
+
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 text-sm">
+              <div className="px-4 py-2.5 flex items-center justify-between">
+                <span className="text-gray-500">Loan Type / Purpose</span>
+                <span className="text-gray-900 font-medium">
+                  {(LOAN_TYPE_LABELS[loan.loan_type || ''] || loan.loan_type || '—')} · {loan.loan_purpose === 'refinance' ? 'Refinance' : 'Purchase'}
+                </span>
+              </div>
+              <div className="px-4 py-2.5 flex items-center justify-between">
+                <span className="text-gray-500">Property</span>
+                <span className="text-gray-900 text-right">
+                  {[loan.property_address, loan.property_city, loan.property_state, loan.property_zip].filter(Boolean).join(', ') || '—'}
+                </span>
+              </div>
+              <div className="px-4 py-2.5 flex items-center justify-between">
+                <span className="text-gray-500">{loan.loan_purpose === 'refinance' ? 'Estimated Value' : 'Purchase Price'}</span>
+                <span className="text-gray-900 font-medium">
+                  ${((loan.loan_purpose === 'refinance' ? loan.estimated_value : loan.purchase_price) || 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="px-4 py-2.5 flex items-center justify-between">
+                <span className="text-gray-500">Loan Amount</span>
+                <span className="text-gray-900 font-medium">${(loan.loan_amount || 0).toLocaleString()}</span>
+              </div>
+              {borrower && (
+                <div className="px-4 py-2.5 flex items-center justify-between">
+                  <span className="text-gray-500">Borrower</span>
+                  <span className="text-gray-900">{borrower.borrower_name}</span>
+                </div>
+              )}
+            </div>
+
+            {appraisalError && (
+              <div className="px-3 py-2 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">{appraisalError}</div>
+            )}
+
+            {appraisalResult && (
+              <div className="px-3 py-2 bg-teal-50 border border-teal-100 rounded-lg text-sm text-teal-800 space-y-1">
+                <p className="font-medium">Order classified as <span className="font-mono">{appraisalResult.classification.productCode}</span></p>
+                {appraisalResult.classification.needsArv && <p className="text-xs">Includes After-Repair Value (ARV)</p>}
+                {appraisalResult.orderId && <p className="text-xs">Valora order id: {appraisalResult.orderId}</p>}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowAppraisalModal(false)}
+                disabled={orderingAppraisal}
+                className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleOrderAppraisal}
+                disabled={orderingAppraisal || !valoraConnected}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {orderingAppraisal ? <Loader2 className="w-4 h-4 animate-spin" /> : <Home className="w-4 h-4" />}
+                {orderingAppraisal ? 'Submitting…' : 'Submit Order'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

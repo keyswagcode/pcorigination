@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { inviteTeamMember } from '../../services/teamInviteService';
 import { saveIscCredentials, clearIscCredentials } from '../../services/iscCreditService';
+import { saveValoraCredentials, clearValoraCredentials } from '../../services/valoraAppraisalService';
 
 /** Determine if currentUser can edit targetMember */
 function canEditMember(currentRole: string, currentUserId: string, targetMember: { user_id: string; role: string | null; invited_by_user_id?: string | null }): boolean {
@@ -82,6 +83,46 @@ export function BrokerSettingsPage() {
       setError(err instanceof Error ? err.message : 'Failed to remove ISC credentials');
     } finally {
       setSavingIsc(false);
+    }
+  };
+
+  // Valora AMC
+  const [valoraUsername, setValoraUsername] = useState('');
+  const [valoraPassword, setValoraPassword] = useState('');
+  const [savingValora, setSavingValora] = useState(false);
+  const valoraConnected = !!userAccount?.valora_username;
+
+  const handleSaveValora = async () => {
+    if (!valoraUsername || !valoraPassword) return;
+    setSavingValora(true);
+    setError(null);
+    try {
+      await saveValoraCredentials(valoraUsername, valoraPassword);
+      await refreshUserAccount();
+      setValoraPassword('');
+      setSuccess('Valora credentials saved');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save Valora credentials');
+    } finally {
+      setSavingValora(false);
+    }
+  };
+
+  const handleDisconnectValora = async () => {
+    setSavingValora(true);
+    setError(null);
+    try {
+      await clearValoraCredentials();
+      await refreshUserAccount();
+      setValoraUsername('');
+      setValoraPassword('');
+      setSuccess('Valora credentials removed');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove Valora credentials');
+    } finally {
+      setSavingValora(false);
     }
   };
 
@@ -480,6 +521,66 @@ export function BrokerSettingsPage() {
               <button
                 onClick={handleDisconnectIsc}
                 disabled={savingIsc}
+                className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50"
+              >
+                Disconnect
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Valora AMC */}
+      <div className="border border-gray-200 rounded-xl bg-white p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Order Appraisal (Valora AMC)</h2>
+              <p className="text-sm text-gray-500">Your personal Valora AMC login. Used to order appraisals straight from a loan.</p>
+            </div>
+          </div>
+          {valoraConnected && (
+            <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-medium rounded-full">Connected</span>
+          )}
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Valora Username</label>
+            <input
+              type="text"
+              value={valoraUsername || (valoraConnected ? userAccount?.valora_username || '' : '')}
+              onChange={e => setValoraUsername(e.target.value)}
+              autoComplete="off"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+              placeholder="your-valora-login"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Valora Password</label>
+            <input
+              type="password"
+              value={valoraPassword}
+              onChange={e => setValoraPassword(e.target.value)}
+              autoComplete="new-password"
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 font-mono"
+              placeholder={valoraConnected ? '••••••••• (saved — re-enter to update)' : 'Enter your Valora password'}
+            />
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={handleSaveValora}
+              disabled={savingValora || !valoraUsername || !valoraPassword}
+              className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50"
+            >
+              {savingValora ? 'Saving…' : valoraConnected ? 'Update Credentials' : 'Save Credentials'}
+            </button>
+            {valoraConnected && (
+              <button
+                onClick={handleDisconnectValora}
+                disabled={savingValora}
                 className="px-4 py-2 text-sm font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50"
               >
                 Disconnect
