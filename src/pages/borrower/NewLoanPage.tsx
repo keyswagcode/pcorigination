@@ -6,6 +6,7 @@ import {
   ArrowLeft, ArrowRight, Home, RefreshCw, DollarSign, Loader2, AlertCircle,
   Building2, Hammer, Landmark
 } from 'lucide-react';
+import { syncLoanCreatedToGhl } from '../../services/ghlSyncService';
 
 type LoanPurpose = 'purchase' | 'refinance' | null;
 type LoanType = 'dscr' | 'fix_flip' | 'bridge' | null;
@@ -138,7 +139,7 @@ export function NewLoanPage() {
       const ltv = propValue > 0 ? (loanAmount / propValue) * 100 : 0;
       const isRefi = loanPurpose === 'refinance';
 
-      const { error: insertError } = await supabase.from('loan_scenarios').insert({
+      const { data: insertedLoan, error: insertError } = await supabase.from('loan_scenarios').insert({
         borrower_id: borrowerId,
         scenario_name: `${isRefi ? 'Refinance' : 'Purchase'} - ${propertyAddress || 'New Property'}`,
         loan_type: loanType,
@@ -156,9 +157,15 @@ export function NewLoanPage() {
         after_repair_value: showRehabBudget && afterRepairValue ? parseCurrency(afterRepairValue) : null,
         refinance_type: loanPurpose === 'refinance' ? refinanceType || null : null,
         status: 'submitted',
-      });
+      }).select('id').single();
 
       if (insertError) throw insertError;
+
+      // Push to GoHighLevel as a new Opportunity under the borrower's contact
+      if (insertedLoan?.id && borrowerId) {
+        syncLoanCreatedToGhl(borrowerId, insertedLoan.id);
+      }
+
       navigate('/application/loans');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create loan');

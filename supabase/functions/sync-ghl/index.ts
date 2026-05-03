@@ -93,6 +93,74 @@ async function addTags(contactId: string, tags: string[]): Promise<void> {
   await ghlRequest('POST', `/contacts/${contactId}/tags`, { tags })
 }
 
+interface PipelineStage { id?: string; name?: string }
+interface Pipeline { id?: string; name?: string; stages?: PipelineStage[] }
+interface PipelinesResponse { pipelines?: Pipeline[] }
+
+async function findDefaultPipeline(locationId: string): Promise<{ pipelineId: string; pipelineStageId: string } | null> {
+  const explicitPipeline = Deno.env.get('GHL_PIPELINE_ID')
+  const explicitStage = Deno.env.get('GHL_PIPELINE_STAGE_ID')
+  // Always fetch so we can resolve stage if it wasn't provided.
+  const { ok, data } = await ghlRequest('GET', `/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`)
+  if (!ok || !data) {
+    if (explicitPipeline && explicitStage) return { pipelineId: explicitPipeline, pipelineStageId: explicitStage }
+    return null
+  }
+  const pipelines = (data as PipelinesResponse).pipelines || []
+  if (pipelines.length === 0) return null
+
+  const chosen = explicitPipeline ? pipelines.find(p => p.id === explicitPipeline) || pipelines[0] : pipelines[0]
+  if (!chosen?.id) return null
+  const stages = chosen.stages || []
+  const stageId = explicitStage && stages.some(s => s.id === explicitStage)
+    ? explicitStage
+    : stages[0]?.id
+  if (!stageId) return null
+  return { pipelineId: chosen.id, pipelineStageId: stageId }
+}
+
+interface CreateOpportunityParams {
+  locationId: string
+  pipelineId: string
+  pipelineStageId: string
+  contactId: string
+  name: string
+  monetaryValue: number | null
+  assignedTo: string | null
+  source?: string
+}
+
+async function createOpportunity(params: CreateOpportunityParams): Promise<{ id: string | null; error?: string }> {
+  const body: Record<string, unknown> = {
+    locationId: params.locationId,
+    pipelineId: params.pipelineId,
+    pipelineStageId: params.pipelineStageId,
+    name: params.name,
+    status: 'open',
+    contactId: params.contactId,
+    source: params.source || 'Borrower Portal',
+  }
+  if (params.monetaryValue && params.monetaryValue > 0) body.monetaryValue = params.monetaryValue
+  if (params.assignedTo) body.assignedTo = params.assignedTo
+
+  const res = await ghlRequest('POST', '/opportunities/', body)
+  if (res.ok && res.data) {
+    const data = res.data as Record<string, unknown>
+    const opp = (data.opportunity as Record<string, unknown> | undefined) || data
+    const id = (opp?.id as string | undefined) || null
+    return { id }
+  }
+  return { id: null, error: `GHL opportunity create ${res.status}: ${res.raw.slice(0, 300)}` }
+}
+
+const LOAN_TYPE_LABELS: Record<string, string> = {
+  dscr: 'DSCR Rental',
+  fix_flip: 'Fix & Flip',
+  bridge: 'Bridge',
+  ground_up: 'Ground-Up Construction',
+  bank_statement: 'Bank Statement',
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -125,7 +193,8 @@ serve(async (req) => {
       })
     }
 
-    const { action, borrower_id } = await req.json()
+    const body = await req.json()
+    const { action, borrower_id, loan_id } = body
     if (!borrower_id) {
       return new Response(JSON.stringify({ error: 'Missing borrower_id' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -136,6 +205,7 @@ serve(async (req) => {
       borrower_filled_app: 'Filled out App',
       borrower_pre_approved: 'Pre-Approved',
       borrower_doc_uploaded: 'Docs Uploaded',
+      loan_created: 'New Loan',
     }
     const tag = tagForAction[action]
     if (!tag) {
@@ -200,12 +270,59 @@ serve(async (req) => {
       // pick up the tag even if the upsert request didn't apply it.
       await addTags(upsert.contactId, [tag])
 
+      let opportunityId: string | null = null
+      let opportunityNote = ''
+
+      if (action === 'loan_created') {
+        if (!loan_id) {
+          return new Response(JSON.stringify({ ok: false, error: 'Missing loan_id for loan_created action' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          })
+        }
+
+        const { data: loan } = await serviceClient
+          .from('loan_scenarios')
+          .select('id, scenario_name, loan_type, loan_purpose, loan_amount, ltv, property_address, property_city, property_state, property_zip, property_type, purchase_price, estimated_value, after_repair_value, rehab_budget, refinance_type')
+          .eq('id', loan_id)
+          .maybeSingle()
+        if (!loan) throw new Error(`Loan scenario ${loan_id} not found`)
+
+        const pipeline = await findDefaultPipeline(locationId)
+        if (!pipeline) {
+          opportunityNote = ' · pipeline lookup failed (no opportunity created)'
+        } else {
+          const loanTypeLabel = LOAN_TYPE_LABELS[loan.loan_type || ''] || loan.loan_type || 'Loan'
+          const purposeLabel = loan.loan_purpose === 'refinance' ? 'Refinance' : 'Purchase'
+          const propertyDescriptor = [loan.property_address, loan.property_city, loan.property_state]
+            .filter(Boolean)
+            .join(', ') || 'New property'
+          const opportunityName = `${borrower.borrower_name} · ${loanTypeLabel} ${purposeLabel} · ${propertyDescriptor}`
+
+          const opp = await createOpportunity({
+            locationId,
+            pipelineId: pipeline.pipelineId,
+            pipelineStageId: pipeline.pipelineStageId,
+            contactId: upsert.contactId,
+            name: opportunityName.slice(0, 255),
+            monetaryValue: Number(loan.loan_amount) || null,
+            assignedTo: ghlUserId,
+            source: 'Borrower Portal',
+          })
+          if (opp.id) {
+            opportunityId = opp.id
+            opportunityNote = ` · opportunity ${opp.id} (${loanTypeLabel}, $${(Number(loan.loan_amount) || 0).toLocaleString()})`
+          } else {
+            opportunityNote = ` · opportunity create failed: ${opp.error || 'unknown'}`
+          }
+        }
+      }
+
       await serviceClient.from('borrower_activity_log').insert({
         borrower_id,
         user_id: user.id,
         event_type: 'ghl_synced',
         title: 'Synced to GoHighLevel',
-        details: `Contact ${upsert.contactId} · ${upsert.created ? 'created' : 'updated'} · tag: ${tag}${ghlUserId ? ` · assignedTo broker user ${ghlUserId}` : ' · no broker user match'}`,
+        details: `Contact ${upsert.contactId} · ${upsert.created ? 'created' : 'updated'} · tag: ${tag}${ghlUserId ? ` · assignedTo broker user ${ghlUserId}` : ' · no broker user match'}${opportunityNote}`,
       })
 
       return new Response(JSON.stringify({
@@ -213,6 +330,7 @@ serve(async (req) => {
         contact_id: upsert.contactId,
         created: upsert.created,
         assigned: !!ghlUserId,
+        opportunity_id: opportunityId,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     } catch (err) {
       const msg = (err as Error).message.slice(0, 500)
