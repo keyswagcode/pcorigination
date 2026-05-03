@@ -81,6 +81,16 @@ const PIPELINE_STAGES = [
   { key: 'closed_won', label: 'Closed Won' },
 ];
 
+const PIPELINE_STAGE_KEYS = new Set(PIPELINE_STAGES.map(s => s.key));
+
+/** Map any lifecycle_stage to a column on the kanban. Unrecognized
+ * intermediate states (liquidity_pending, liquidity_verified, etc.)
+ * fall into New so borrowers never disappear from the dashboard. */
+function dashboardStageFor(lifecycleStage: string | null | undefined): string {
+  if (lifecycleStage && PIPELINE_STAGE_KEYS.has(lifecycleStage)) return lifecycleStage;
+  return 'profile_created';
+}
+
 export function BrokerDashboardPage() {
   const { user, userAccount } = useAuth();
   const { member, members } = useTeam();
@@ -250,7 +260,7 @@ export function BrokerDashboardPage() {
     const counts: Record<string, number> = {};
     for (const stage of PIPELINE_STAGES) counts[stage.key] = 0;
     for (const b of filteredBorrowers) {
-      const stage = b.lifecycle_stage || 'profile_created';
+      const stage = dashboardStageFor(b.lifecycle_stage);
       if (counts[stage] !== undefined) counts[stage]++;
     }
     return counts;
@@ -356,7 +366,7 @@ export function BrokerDashboardPage() {
           {PIPELINE_STAGES.map(stage => {
             const count = pipelineCounts[stage.key];
             const stageBorrowers = filteredBorrowers
-              .filter(b => (b.lifecycle_stage || 'profile_created') === stage.key)
+              .filter(b => dashboardStageFor(b.lifecycle_stage) === stage.key)
               .sort((a, b) => {
                 const aPending = pendingPreApprovalIds.has(a.id) ? 1 : 0;
                 const bPending = pendingPreApprovalIds.has(b.id) ? 1 : 0;
@@ -529,7 +539,7 @@ export function BrokerDashboardPage() {
         <h2 className="text-lg font-semibold text-gray-900 mb-3">New Borrowers</h2>
         {(() => {
           const newBorrowers = filteredBorrowers
-            .filter(b => (b.lifecycle_stage || 'profile_created') === 'profile_created')
+            .filter(b => dashboardStageFor(b.lifecycle_stage) === 'profile_created')
             .sort((a, b) => {
               const aPending = pendingPreApprovalIds.has(a.id) ? 1 : 0;
               const bPending = pendingPreApprovalIds.has(b.id) ? 1 : 0;
