@@ -10,6 +10,7 @@ import {
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
 import { generateStatementsPdf } from '../../lib/statementPdfGenerator';
 import { generateURLA1003Pdf } from '../../lib/urla1003Generator';
+import { generateURLA1003MismoXml } from '../../lib/urla1003MismoGenerator';
 import { estimateAnnualIncome } from '../../lib/incomeEstimator';
 import { startCreditPull, pollCreditPull } from '../../services/iscCreditService';
 import { logAudit, getAuditTrail } from '../../services/auditService';
@@ -144,7 +145,7 @@ export function BrokerBorrowerDetailPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [show1003Picker, setShow1003Picker] = useState(false);
+  const [pickerFormat, setPickerFormat] = useState<'pdf' | 'mismo' | null>(null);
   const [generating1003, setGenerating1003] = useState(false);
 
   const isOwner = !!(user && borrower && borrower.broker_id === user.id);
@@ -632,7 +633,7 @@ export function BrokerBorrowerDetailPage() {
     }
   };
 
-  const handleGenerate1003 = async (loanScenarioId: string | null) => {
+  const handleGenerate1003 = async (loanScenarioId: string | null, format: 'pdf' | 'mismo' = 'pdf') => {
     if (!borrower) return;
     setGenerating1003(true);
     try {
@@ -721,7 +722,7 @@ export function BrokerBorrowerDetailPage() {
         isForeignNational: false,
       });
 
-      await generateURLA1003Pdf({
+      const generatorOpts = {
         primary: toBorrowerInput(borrower, profile?.monthly_income ?? null, profile?.liquidity_estimate ?? null),
         coBorrowers: coBorrowers.map(co => toBorrowerInput(co, null, null)),
         loan: loanInput,
@@ -730,7 +731,13 @@ export function BrokerBorrowerDetailPage() {
         brokerEmail,
         brokerPhone,
         generatedDate: new Date().toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }),
-      });
+      };
+
+      if (format === 'mismo') {
+        await generateURLA1003MismoXml(generatorOpts);
+      } else {
+        await generateURLA1003Pdf(generatorOpts);
+      }
 
       if (user) {
         await logAudit({
@@ -739,16 +746,16 @@ export function BrokerBorrowerDetailPage() {
           action: 'generated',
           entityType: 'loan',
           entityId: loanScenarioId || borrower.id,
-          fieldName: 'urla_1003',
+          fieldName: format === 'mismo' ? 'urla_1003_mismo' : 'urla_1003',
           oldValue: '',
-          newValue: 'URLA / Form 1003 PDF',
+          newValue: format === 'mismo' ? 'URLA / Form 1003 MISMO v3.4 XML' : 'URLA / Form 1003 PDF',
         });
       }
 
-      setShow1003Picker(false);
+      setPickerFormat(null);
     } catch (err) {
       console.error('1003 generation failed:', err);
-      alert('Failed to generate 1003.');
+      alert(`Failed to generate 1003 ${format === 'mismo' ? 'MISMO XML' : 'PDF'}.`);
     } finally {
       setGenerating1003(false);
     }
@@ -853,16 +860,29 @@ export function BrokerBorrowerDetailPage() {
           )}
           <button
             onClick={() => {
-              if (loans.length === 0) handleGenerate1003(null);
-              else if (loans.length === 1) handleGenerate1003(loans[0].id);
-              else setShow1003Picker(true);
+              if (loans.length === 0) handleGenerate1003(null, 'pdf');
+              else if (loans.length === 1) handleGenerate1003(loans[0].id, 'pdf');
+              else setPickerFormat('pdf');
             }}
             disabled={generating1003}
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
-            title="Generate Uniform Residential Loan Application (Form 1003)"
+            title="Generate Uniform Residential Loan Application (Form 1003) PDF"
           >
-            {generating1003 ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            {generating1003 && pickerFormat !== 'mismo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
             Generate 1003
+          </button>
+          <button
+            onClick={() => {
+              if (loans.length === 0) handleGenerate1003(null, 'mismo');
+              else if (loans.length === 1) handleGenerate1003(loans[0].id, 'mismo');
+              else setPickerFormat('mismo');
+            }}
+            disabled={generating1003}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
+            title="Generate MISMO v3.4 XML (URLA dataset for AUS/LOS submission)"
+          >
+            {generating1003 && pickerFormat === 'mismo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            Generate MISMO
           </button>
           <a href="https://keyrealestatecapital.com/calculator" target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
@@ -1704,18 +1724,20 @@ export function BrokerBorrowerDetailPage() {
         </div>
       )}
 
-      {/* 1003 loan picker */}
-      {show1003Picker && borrower && (
+      {/* 1003 loan picker (PDF or MISMO) */}
+      {pickerFormat && borrower && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
             <div className="flex items-start justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Generate 1003</h3>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Generate 1003 {pickerFormat === 'mismo' ? 'MISMO XML' : 'PDF'}
+                </h3>
                 <p className="text-sm text-gray-600 mt-1">
-                  Pick which loan scenario should fill Section 4 (Loan & Property Information). Borrower data autofills the rest.
+                  Pick which loan scenario should fill the Loan & Property fields. Borrower data autofills the rest.
                 </p>
               </div>
-              <button onClick={() => setShow1003Picker(false)} className="p-1 text-gray-400 hover:text-gray-600">
+              <button onClick={() => setPickerFormat(null)} className="p-1 text-gray-400 hover:text-gray-600">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1725,7 +1747,7 @@ export function BrokerBorrowerDetailPage() {
                 <button
                   key={l.id}
                   disabled={generating1003}
-                  onClick={() => handleGenerate1003(l.id)}
+                  onClick={() => handleGenerate1003(l.id, pickerFormat)}
                   className="w-full text-left px-4 py-3 border border-gray-200 rounded-lg hover:border-teal-400 hover:bg-teal-50 disabled:opacity-50"
                 >
                   <div className="flex items-center justify-between">
@@ -1745,17 +1767,21 @@ export function BrokerBorrowerDetailPage() {
               ))}
               <button
                 disabled={generating1003}
-                onClick={() => handleGenerate1003(null)}
+                onClick={() => handleGenerate1003(null, pickerFormat)}
                 className="w-full text-left px-4 py-3 border border-dashed border-gray-300 rounded-lg hover:border-teal-400 hover:bg-teal-50 disabled:opacity-50"
               >
                 <p className="text-sm font-medium text-gray-700">Generate without a loan scenario</p>
-                <p className="text-xs text-gray-500 mt-0.5">Section 4 (Loan & Property) will be left blank for the broker to fill in.</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {pickerFormat === 'mismo'
+                    ? 'COLLATERAL + LOANS will be omitted from the MISMO file.'
+                    : 'Section 4 (Loan & Property) will be left blank for the broker to fill in.'}
+                </p>
               </button>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
-                onClick={() => setShow1003Picker(false)}
+                onClick={() => setPickerFormat(null)}
                 disabled={generating1003}
                 className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
               >
