@@ -859,32 +859,34 @@ export function BrokerBorrowerDetailPage() {
               )}
             </div>
           )}
-          <button
-            onClick={() => {
-              if (loans.length === 0) handleGenerate1003(null, 'pdf');
-              else if (loans.length === 1) handleGenerate1003(loans[0].id, 'pdf');
-              else setPickerFormat('pdf');
-            }}
-            disabled={generating1003}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
-            title="Generate Uniform Residential Loan Application (Form 1003) PDF"
-          >
-            {generating1003 && pickerFormat !== 'mismo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-            Generate 1003
-          </button>
-          <button
-            onClick={() => {
-              if (loans.length === 0) handleGenerate1003(null, 'mismo');
-              else if (loans.length === 1) handleGenerate1003(loans[0].id, 'mismo');
-              else setPickerFormat('mismo');
-            }}
-            disabled={generating1003}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
-            title="Generate MISMO v3.4 XML (URLA dataset for AUS/LOS submission)"
-          >
-            {generating1003 && pickerFormat === 'mismo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-            Generate MISMO
-          </button>
+          <div className="flex flex-col gap-1.5">
+            <button
+              onClick={() => {
+                if (loans.length === 0) handleGenerate1003(null, 'pdf');
+                else if (loans.length === 1) handleGenerate1003(loans[0].id, 'pdf');
+                else setPickerFormat('pdf');
+              }}
+              disabled={generating1003}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
+              title="Generate Uniform Residential Loan Application (Form 1003) PDF"
+            >
+              {generating1003 && pickerFormat !== 'mismo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+              Generate 1003
+            </button>
+            <button
+              onClick={() => {
+                if (loans.length === 0) handleGenerate1003(null, 'mismo');
+                else if (loans.length === 1) handleGenerate1003(loans[0].id, 'mismo');
+                else setPickerFormat('mismo');
+              }}
+              disabled={generating1003}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
+              title="Generate MISMO v3.4 XML (URLA dataset for AUS/LOS submission)"
+            >
+              {generating1003 && pickerFormat === 'mismo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+              Generate MISMO
+            </button>
+          </div>
           <a href="https://keyrealestatecapital.com/calculator" target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
             title="Pricing Calculator">
