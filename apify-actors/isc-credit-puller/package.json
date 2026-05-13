@@ -1,0 +1,13 @@
+{
+  "name": "isc-credit-puller",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Apify Actor: log into iscsite.meridianlink.com (interactive, with SMS MFA via Live View), persist session state, and order credit reports headlessly.",
+  "scripts": {
+    "start": "node src/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.2.6",
+    "playwright": "^1.48.0"
+  }
+}

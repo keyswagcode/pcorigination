@@ -1,0 +1,36 @@
+{
+  "title": "ISC Credit Puller input",
+  "description": "One-shot credit pull against iscsite.meridianlink.com. The actor logs in with the broker's stored ISC credentials, pauses for the broker to clear MFA via Apify Live View if challenged, fills the order form with borrower data, fills the broker-supplied credit card on the payment screen, downloads the resulting PDF, and best-effort scrapes the bureau scores.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "iscUsername": { "title": "ISC username", "type": "string", "editor": "textfield" },
+    "iscPassword": { "title": "ISC password", "type": "string", "editor": "textfield", "isSecret": true },
+    "loginUrl": {
+      "title": "Login URL",
+      "type": "string",
+      "default": "https://iscsite.meridianlink.com/custom/login.aspx",
+      "editor": "textfield"
+    },
+    "mfaTimeoutSec": {
+      "title": "MFA wait timeout (seconds)",
+      "description": "How long to give the broker to enter the SMS code via Live View before failing the run",
+      "type": "integer",
+      "default": 300
+    },
+    "borrower": {
+      "title": "Borrower",
+      "type": "object",
+      "editor": "json",
+      "description": "Fields: firstName, lastName, ssn, dob (YYYY-MM-DD), phone, email, addressStreet, addressCity, addressState, addressZip"
+    },
+    "card": {
+      "title": "Credit card (passed through to ISC's payment screen)",
+      "type": "object",
+      "editor": "json",
+      "isSecret": true,
+      "description": "Fields: number, expMonth, expYear, cvc, zip, name (optional). Never stored anywhere — used once and discarded."
+    }
+  },
+  "required": ["iscUsername", "iscPassword", "borrower", "card"]
+}

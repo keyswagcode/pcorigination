@@ -468,7 +468,10 @@ export function BrokerSettingsPage() {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Credit Pull (ISC)</h2>
-              <p className="text-sm text-gray-500">Your personal ISC Credit Bureau login. Used to soft-pull credit on your borrowers.</p>
+              <p className="text-sm text-gray-500">
+                Your personal ISC (MeridianLink) login. We use these to log in for each credit pull. If ISC challenges
+                with SMS MFA, you'll get a live link to enter the code mid-pull.
+              </p>
             </div>
           </div>
           {iscConnected && (

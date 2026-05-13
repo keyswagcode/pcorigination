@@ -20,6 +20,8 @@ async function callPullCreditFunction(action: string, params: Record<string, unk
   return data;
 }
 
+// ----- Credentials -----
+
 export async function saveIscCredentials(username: string, password: string): Promise<void> {
   await callPullCreditFunction('save_credentials', { username, password });
 }
@@ -28,23 +30,39 @@ export async function clearIscCredentials(): Promise<void> {
   await callPullCreditFunction('clear_credentials');
 }
 
-export interface CreditPullResponse {
-  ok: boolean;
-  equifax: number | null;
-  experian: number | null;
-  transunion: number | null;
-  mid_score: number | null;
-}
+// ----- Credit pull (two-phase: start → poll) -----
 
 export interface CardPaymentInput {
   number: string;
-  exp_month: string;
-  exp_year: string;
+  expMonth: string;
+  expYear: string;
   cvc: string;
   zip: string;
   name?: string;
 }
 
-export async function pullCreditForBorrower(borrowerId: string, card: CardPaymentInput): Promise<CreditPullResponse> {
-  return callPullCreditFunction('pull', { borrower_id: borrowerId, card });
+export interface CreditPullStart {
+  ok: boolean;
+  runId: string;
+  liveViewUrl: string | null;
+}
+
+export interface CreditPullStatus {
+  ok: boolean;
+  status: 'pending' | 'succeeded' | 'failed';
+  liveViewUrl?: string | null;
+  error?: string;
+  equifax?: number | null;
+  experian?: number | null;
+  transunion?: number | null;
+  mid_score?: number | null;
+  document_id?: string | null;
+}
+
+export async function startCreditPull(borrowerId: string, card: CardPaymentInput): Promise<CreditPullStart> {
+  return callPullCreditFunction('pull_start', { borrower_id: borrowerId, card });
+}
+
+export async function pollCreditPull(runId: string, borrowerId: string): Promise<CreditPullStatus> {
+  return callPullCreditFunction('pull_status', { runId, borrower_id: borrowerId });
 }

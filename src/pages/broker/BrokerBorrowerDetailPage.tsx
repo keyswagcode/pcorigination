@@ -9,8 +9,9 @@ import {
 } from 'lucide-react';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
 import { generateStatementsPdf } from '../../lib/statementPdfGenerator';
+import { generateURLA1003Pdf } from '../../lib/urla1003Generator';
 import { estimateAnnualIncome } from '../../lib/incomeEstimator';
-import { pullCreditForBorrower } from '../../services/iscCreditService';
+import { startCreditPull, pollCreditPull } from '../../services/iscCreditService';
 import { logAudit, getAuditTrail } from '../../services/auditService';
 import type { AuditEntry } from '../../services/auditService';
 
@@ -143,6 +144,8 @@ export function BrokerBorrowerDetailPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [show1003Picker, setShow1003Picker] = useState(false);
+  const [generating1003, setGenerating1003] = useState(false);
 
   const isOwner = !!(user && borrower && borrower.broker_id === user.id);
 
@@ -180,6 +183,9 @@ export function BrokerBorrowerDetailPage() {
   const [ccCvc, setCcCvc] = useState('');
   const [ccZip, setCcZip] = useState('');
   const [ccName, setCcName] = useState('');
+  const [pullRunId, setPullRunId] = useState<string | null>(null);
+  const [pullLiveViewUrl, setPullLiveViewUrl] = useState<string | null>(null);
+  const [pullStatusMessage, setPullStatusMessage] = useState<string | null>(null);
 
   const formatCardNumber = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 19);
@@ -194,6 +200,9 @@ export function BrokerBorrowerDetailPage() {
     setCcCvc('');
     setCcZip('');
     setCcName('');
+    setPullRunId(null);
+    setPullLiveViewUrl(null);
+    setPullStatusMessage(null);
   };
 
   const handlePullCredit = async () => {
@@ -206,27 +215,60 @@ export function BrokerBorrowerDetailPage() {
     setPullingCredit(true);
     setCreditPullError(null);
     setCreditPullResult(null);
+    setPullStatusMessage('Logging in to ISC…');
     try {
-      const res = await pullCreditForBorrower(borrower.id, {
+      const start = await startCreditPull(borrower.id, {
         number: digits,
-        exp_month: ccExpMonth,
-        exp_year: ccExpYear,
+        expMonth: ccExpMonth,
+        expYear: ccExpYear,
         cvc: ccCvc,
         zip: ccZip,
         name: ccName || undefined,
       });
-      setCreditPullResult({
-        equifax: res.equifax,
-        experian: res.experian,
-        transunion: res.transunion,
-        mid_score: res.mid_score,
-      });
-      closeCreditCardModal();
-      await loadData();
+      setPullRunId(start.runId);
+      setPullLiveViewUrl(start.liveViewUrl);
+      setPullStatusMessage('Working in ISC… if SMS MFA is required, use the link below to enter the code.');
+
+      // Poll until done
+      const poll = async () => {
+        if (!borrower) return;
+        try {
+          const status = await pollCreditPull(start.runId, borrower.id);
+          if (status.liveViewUrl) setPullLiveViewUrl(status.liveViewUrl);
+          if (status.status === 'succeeded') {
+            setCreditPullResult({
+              equifax: status.equifax ?? null,
+              experian: status.experian ?? null,
+              transunion: status.transunion ?? null,
+              mid_score: status.mid_score ?? null,
+            });
+            setPullingCredit(false);
+            setPullStatusMessage(null);
+            setPullRunId(null);
+            setPullLiveViewUrl(null);
+            closeCreditCardModal();
+            await loadData();
+            return;
+          }
+          if (status.status === 'failed') {
+            setCreditPullError(status.error || 'Credit pull failed');
+            setPullingCredit(false);
+            setPullStatusMessage(null);
+            setPullRunId(null);
+            return;
+          }
+          setTimeout(poll, 4000);
+        } catch (err) {
+          setCreditPullError(err instanceof Error ? err.message : 'Credit pull failed');
+          setPullingCredit(false);
+          setPullStatusMessage(null);
+        }
+      };
+      setTimeout(poll, 4000);
     } catch (err) {
       setCreditPullError(err instanceof Error ? err.message : 'Failed to pull credit');
-    } finally {
       setPullingCredit(false);
+      setPullStatusMessage(null);
     }
   };
 
@@ -590,6 +632,128 @@ export function BrokerBorrowerDetailPage() {
     }
   };
 
+  const handleGenerate1003 = async (loanScenarioId: string | null) => {
+    if (!borrower) return;
+    setGenerating1003(true);
+    try {
+      // Resolve org + broker info (mirrors the pattern used by handleGeneratePreApprovals)
+      let orgName = 'Loan Originator';
+      let brokerName = 'Loan Originator';
+      let brokerEmail: string | null = null;
+      let brokerPhone: string | null = null;
+      if (user) {
+        const [{ data: orgMember }, { data: brokerData }] = await Promise.all([
+          supabase
+            .from('organization_members')
+            .select('organizations(name)')
+            .eq('user_id', user.id)
+            .maybeSingle(),
+          supabase
+            .from('user_accounts')
+            .select('first_name, last_name, email, phone')
+            .eq('id', user.id)
+            .maybeSingle(),
+        ]);
+        const org = orgMember?.organizations as unknown as { name?: string } | null;
+        if (org?.name) orgName = org.name;
+        if (brokerData) {
+          brokerName = [brokerData.first_name, brokerData.last_name].filter(Boolean).join(' ') || brokerName;
+          brokerEmail = brokerData.email || null;
+          brokerPhone = (brokerData as { phone?: string | null }).phone || null;
+        }
+      }
+
+      // Pull full loan_scenario if one was selected (the loans state only has summary fields)
+      let loanInput = null;
+      if (loanScenarioId) {
+        const { data: loanRow } = await supabase
+          .from('loan_scenarios')
+          .select('loan_amount, loan_purpose, loan_type, property_address, property_city, property_state, property_zip, property_type, occupancy, purchase_price, estimated_value, rent, ltv')
+          .eq('id', loanScenarioId)
+          .maybeSingle();
+        if (loanRow) {
+          loanInput = {
+            loanAmount: loanRow.loan_amount,
+            loanPurpose: loanRow.loan_purpose,
+            loanType: loanRow.loan_type,
+            propertyAddress: loanRow.property_address,
+            propertyCity: loanRow.property_city,
+            propertyState: loanRow.property_state,
+            propertyZip: loanRow.property_zip,
+            propertyType: loanRow.property_type,
+            occupancy: loanRow.occupancy,
+            purchasePrice: loanRow.purchase_price,
+            estimatedValue: loanRow.estimated_value,
+            rent: loanRow.rent,
+            ltv: loanRow.ltv,
+          };
+        }
+      }
+
+      // Borrower financial signals (income/liquidity) for autofill
+      const { data: profile } = await supabase
+        .from('borrower_financial_profiles')
+        .select('monthly_income, liquidity_estimate')
+        .eq('borrower_id', borrower.id)
+        .maybeSingle();
+
+      const toBorrowerInput = (
+        b: Borrower | CoBorrower,
+        profileMonthly: number | null,
+        profileLiquidity: number | null,
+      ) => ({
+        borrowerName: b.borrower_name || '',
+        email: b.email,
+        phone: b.phone,
+        dateOfBirth: b.date_of_birth,
+        ssn: b.ssn_encrypted,
+        ssnLast4: b.ssn_last4,
+        creditScore: b.credit_score,
+        addressStreet: b.address_street,
+        addressCity: b.address_city,
+        addressState: b.address_state,
+        addressZip: b.address_zip,
+        entityType: 'entity_type' in b ? b.entity_type : null,
+        stateOfResidence: 'state_of_residence' in b ? b.state_of_residence : null,
+        monthlyIncome: profileMonthly,
+        liquidity: profileLiquidity,
+        isFirstTimeInvestor: false,
+        isForeignNational: false,
+      });
+
+      await generateURLA1003Pdf({
+        primary: toBorrowerInput(borrower, profile?.monthly_income ?? null, profile?.liquidity_estimate ?? null),
+        coBorrowers: coBorrowers.map(co => toBorrowerInput(co, null, null)),
+        loan: loanInput,
+        orgName,
+        brokerName,
+        brokerEmail,
+        brokerPhone,
+        generatedDate: new Date().toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }),
+      });
+
+      if (user) {
+        await logAudit({
+          borrowerId: borrower.id,
+          userId: user.id,
+          action: 'generated',
+          entityType: 'loan',
+          entityId: loanScenarioId || borrower.id,
+          fieldName: 'urla_1003',
+          oldValue: '',
+          newValue: 'URLA / Form 1003 PDF',
+        });
+      }
+
+      setShow1003Picker(false);
+    } catch (err) {
+      console.error('1003 generation failed:', err);
+      alert('Failed to generate 1003.');
+    } finally {
+      setGenerating1003(false);
+    }
+  };
+
   const handleDownloadDoc = async (doc: UploadedDoc) => {
     try {
       const { data, error } = await supabase.storage
@@ -687,6 +851,19 @@ export function BrokerBorrowerDetailPage() {
               )}
             </div>
           )}
+          <button
+            onClick={() => {
+              if (loans.length === 0) handleGenerate1003(null);
+              else if (loans.length === 1) handleGenerate1003(loans[0].id);
+              else setShow1003Picker(true);
+            }}
+            disabled={generating1003}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
+            title="Generate Uniform Residential Loan Application (Form 1003)"
+          >
+            {generating1003 ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            Generate 1003
+          </button>
           <a href="https://keyrealestatecapital.com/calculator" target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
             title="Pricing Calculator">
@@ -816,7 +993,7 @@ export function BrokerBorrowerDetailPage() {
               ? 'Add your ISC credentials in Settings before pulling credit'
               : !consentGiven
                 ? 'Borrower has not given credit consent'
-                : 'Soft-pull credit via ISC Credit Bureau';
+                : 'Pull credit via ISC (MeridianLink) — downloads PDF to Documents';
             return (
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -826,7 +1003,7 @@ export function BrokerBorrowerDetailPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => { setCreditPullError(null); setShowCreditCardModal(true); }}
+                    onClick={() => { setCreditPullError(null); setCreditPullResult(null); setShowCreditCardModal(true); }}
                     disabled={disabled}
                     title={tooltip}
                     className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1527,6 +1704,68 @@ export function BrokerBorrowerDetailPage() {
         </div>
       )}
 
+      {/* 1003 loan picker */}
+      {show1003Picker && borrower && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Generate 1003</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  Pick which loan scenario should fill Section 4 (Loan & Property Information). Borrower data autofills the rest.
+                </p>
+              </div>
+              <button onClick={() => setShow1003Picker(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {loans.map(l => (
+                <button
+                  key={l.id}
+                  disabled={generating1003}
+                  onClick={() => handleGenerate1003(l.id)}
+                  className="w-full text-left px-4 py-3 border border-gray-200 rounded-lg hover:border-teal-400 hover:bg-teal-50 disabled:opacity-50"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{l.scenario_name || 'Untitled scenario'}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {LOAN_TYPE_LABELS[l.loan_type || ''] || l.loan_type || 'Loan'}
+                        {l.loan_amount ? ` · $${l.loan_amount.toLocaleString()}` : ''}
+                        {' · '}{new Date(l.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[l.status] || 'bg-gray-100 text-gray-600'}`}>
+                      {l.status}
+                    </span>
+                  </div>
+                </button>
+              ))}
+              <button
+                disabled={generating1003}
+                onClick={() => handleGenerate1003(null)}
+                className="w-full text-left px-4 py-3 border border-dashed border-gray-300 rounded-lg hover:border-teal-400 hover:bg-teal-50 disabled:opacity-50"
+              >
+                <p className="text-sm font-medium text-gray-700">Generate without a loan scenario</p>
+                <p className="text-xs text-gray-500 mt-0.5">Section 4 (Loan & Property) will be left blank for the broker to fill in.</p>
+              </button>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShow1003Picker(false)}
+                disabled={generating1003}
+                className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete borrower confirmation */}
       {showDeleteConfirm && borrower && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -1590,12 +1829,34 @@ export function BrokerBorrowerDetailPage() {
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Pull Credit for {borrower.borrower_name}</h3>
-                <p className="text-xs text-gray-500 mt-1">ISC bills your card directly. We do not store card details.</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  ISC bills your card directly. We pass the card to ISC once and never store it.
+                </p>
               </div>
-              <button onClick={closeCreditCardModal} className="p-1 text-gray-400 hover:text-gray-600">
+              <button onClick={closeCreditCardModal} disabled={pullingCredit} className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50">
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {pullStatusMessage && (
+              <div className="px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg text-sm text-amber-800 space-y-1">
+                <p className="font-medium">{pullStatusMessage}</p>
+                {pullLiveViewUrl && (
+                  <p>
+                    <a
+                      href={pullLiveViewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-amber-700 font-medium"
+                    >
+                      Open ISC window
+                    </a>{' '}
+                    <span className="text-xs text-amber-600">— use this if ISC sends an SMS code to enter.</span>
+                  </p>
+                )}
+                {pullRunId && <p className="text-[10px] text-amber-500 font-mono">run {pullRunId.slice(0, 12)}</p>}
+              </div>
+            )}
 
             <div className="space-y-3">
               <div>
@@ -1604,8 +1865,9 @@ export function BrokerBorrowerDetailPage() {
                   type="text"
                   value={ccName}
                   onChange={e => setCcName(e.target.value)}
+                  disabled={pullingCredit}
                   autoComplete="cc-name"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600 disabled:opacity-50"
                   placeholder="As it appears on the card"
                 />
               </div>
@@ -1616,8 +1878,9 @@ export function BrokerBorrowerDetailPage() {
                   inputMode="numeric"
                   value={ccNumber}
                   onChange={e => setCcNumber(formatCardNumber(e.target.value))}
+                  disabled={pullingCredit}
                   autoComplete="cc-number"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-600 disabled:opacity-50"
                   placeholder="1234 5678 9012 3456"
                   required
                 />
@@ -1630,8 +1893,9 @@ export function BrokerBorrowerDetailPage() {
                     inputMode="numeric"
                     value={ccExpMonth}
                     onChange={e => setCcExpMonth(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                    disabled={pullingCredit}
                     autoComplete="cc-exp-month"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600 disabled:opacity-50"
                     placeholder="MM"
                     required
                   />
@@ -1643,8 +1907,9 @@ export function BrokerBorrowerDetailPage() {
                     inputMode="numeric"
                     value={ccExpYear}
                     onChange={e => setCcExpYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    disabled={pullingCredit}
                     autoComplete="cc-exp-year"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600 disabled:opacity-50"
                     placeholder="YY"
                     required
                   />
@@ -1656,8 +1921,9 @@ export function BrokerBorrowerDetailPage() {
                     inputMode="numeric"
                     value={ccCvc}
                     onChange={e => setCcCvc(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    disabled={pullingCredit}
                     autoComplete="cc-csc"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600 disabled:opacity-50"
                     placeholder="123"
                     required
                   />
@@ -1670,8 +1936,9 @@ export function BrokerBorrowerDetailPage() {
                   inputMode="numeric"
                   value={ccZip}
                   onChange={e => setCcZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                  disabled={pullingCredit}
                   autoComplete="postal-code"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-600 disabled:opacity-50"
                   placeholder="12345"
                   required
                 />
@@ -1702,6 +1969,7 @@ export function BrokerBorrowerDetailPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
