@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTeam } from '../../components/team/TeamContext';
 import { Briefcase, Loader2, Search, ArrowRight } from 'lucide-react';
 
 interface LoanRow {
@@ -37,12 +38,17 @@ const LOAN_TYPE_LABELS: Record<string, string> = {
 
 export function AllLoansPage() {
   const { userAccount } = useAuth();
+  const { member } = useTeam();
   const [loans, setLoans] = useState<LoanRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
 
-  const isAdminLike = userAccount?.user_role === 'admin' || userAccount?.user_role === 'reviewer';
+  const isAdminLike =
+    userAccount?.user_role === 'admin' ||
+    userAccount?.user_role === 'reviewer' ||
+    member?.role === 'owner' ||
+    member?.role === 'admin';
 
   const loadData = useCallback(async () => {
     setIsLoading(true);

@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useTeam } from '../components/team/TeamContext';
 import { supabase } from '../lib/supabase';
 import {
   LayoutDashboard,
@@ -35,6 +36,7 @@ const adminNavItems = [
 
 export function InternalLayout() {
   const { user, userAccount, signOut } = useAuth();
+  const { member } = useTeam();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [orgName, setOrgName] = useState<string>('Loan Platform');
@@ -63,7 +65,9 @@ export function InternalLayout() {
   };
 
   const role = userAccount?.user_role;
-  const navItems = (role === 'reviewer' || role === 'admin') ? adminNavItems : brokerNavItems;
+  const orgRole = member?.role;
+  const isAdminLike = role === 'reviewer' || role === 'admin' || orgRole === 'owner' || orgRole === 'admin';
+  const navItems = isAdminLike ? adminNavItems : brokerNavItems;
 
   return (
     <div className="min-h-screen bg-gray-100">
