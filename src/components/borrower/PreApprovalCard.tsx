@@ -1,4 +1,4 @@
-import { CheckCircle, ArrowRight, DollarSign, Shield, AlertCircle, FileText, Download, Clock } from 'lucide-react';
+import { CheckCircle, ArrowRight, DollarSign, Shield, FileText, Download, Clock } from 'lucide-react';
 import { getLoanTypeConfig, type BorrowerLoanType } from '../../lib/loanTypeDocuments';
 
 interface PreApprovalData {

@@ -453,7 +453,7 @@ export function BorrowerFilePage() {
 
                   <div className="bg-white rounded-lg border border-gray-200 p-4">
                     <h4 className="font-semibold text-gray-900 mb-3">AE Ownership</h4>
-                    {borrower.assigned_ae_id ? (
+                    {borrower.broker_id ? (
                       <div className="flex items-center gap-2">
                         <UserCheck className="w-4 h-4 text-green-600" />
                         <span className="text-sm text-gray-900">Assigned</span>

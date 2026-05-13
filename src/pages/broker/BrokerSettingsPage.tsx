@@ -35,7 +35,7 @@ export function BrokerSettingsPage() {
   const [posSlug, setPosSlug] = useState('');
   const [originalSlug, setOriginalSlug] = useState('');
   const [orgId, setOrgId] = useState<string | null>(null);
-  const [orgName, setOrgName] = useState('');
+  const [, setOrgName] = useState('');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -161,7 +161,7 @@ export function BrokerSettingsPage() {
         .maybeSingle();
 
       if (orgMember?.organizations) {
-        const org = orgMember.organizations as { id: string; name: string; logo_url: string | null };
+        const org = orgMember.organizations as unknown as { id: string; name: string; logo_url: string | null };
         setOrgId(org.id);
         setOrgName(org.name || '');
         setLogoUrl(org.logo_url || null);

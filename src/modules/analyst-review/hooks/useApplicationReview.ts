@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { fetchApplicationById, fetchStatusHistory, updateApplicationStatus } from '../../../services/applicationService';
-import { fetchDocumentsForApplication, fetchNormalizedBankAccounts } from '../../../services/documentService';
+import { fetchNormalizedBankAccounts } from '../../../services/documentService';
 import { fetchPreApprovalsForApplication } from '../../../services/placementService';
 import { useAuth } from '../../../contexts/AuthContext';
 import type { Application, ApplicationStatus, ApplicationStatusHistory, NormalizedBankAccount, PreApproval } from '../../../shared/types';

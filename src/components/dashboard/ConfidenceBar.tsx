@@ -3,6 +3,8 @@ interface ConfidenceBarProps {
   label?: string;
   height?: string;
   showLabel?: boolean;
+  size?: 'sm' | 'md' | 'lg';
+  showPercentage?: boolean;
 }
 
 export function ConfidenceBar({ value, label, height = 'h-2', showLabel = true }: ConfidenceBarProps) {

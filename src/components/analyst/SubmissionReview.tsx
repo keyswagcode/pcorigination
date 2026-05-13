@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, User, Building2, DollarSign, MapPin, Calendar, FileText, CheckCircle as CheckCircle2, Circle as XCircle, Clock, AlertTriangle, Download, Eye, Loader as Loader2, Phone, Mail, Hop as Home, Banknote, Shield, Bot, BookOpen } from 'lucide-react';
+import { ArrowLeft, User, DollarSign, Calendar, FileText, CheckCircle as CheckCircle2, Circle as XCircle, AlertTriangle, Download, Eye, Loader as Loader2, Phone, Mail, Hop as Home, Banknote, Shield, Bot, BookOpen } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { PlacerBotPanel } from '../placerbot';
 import { LenderRulebookPanel } from './LenderRulebookPanel';
@@ -186,7 +186,7 @@ export function SubmissionReview({ submissionId, onBack }: SubmissionReviewProps
     if (error) {
       console.error('Error fetching submission:', error);
     } else {
-      setSubmission(data);
+      setSubmission(data as unknown as SubmissionDetail);
     }
 
     setLoading(false);

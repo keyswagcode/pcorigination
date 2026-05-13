@@ -34,8 +34,8 @@ export function BorrowerDashboard() {
 
   return (
     <PreApprovalJourney
-      borrower={borrower}
-      preApprovals={preApprovals}
+      borrower={borrower as unknown as Parameters<typeof PreApprovalJourney>[0]['borrower']}
+      preApprovals={preApprovals as unknown as Parameters<typeof PreApprovalJourney>[0]['preApprovals']}
       onComplete={handleJourneyComplete}
       onRefresh={refetch}
     />

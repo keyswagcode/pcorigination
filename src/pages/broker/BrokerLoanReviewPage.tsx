@@ -3,8 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
-  ArrowLeft, CheckCircle2, XCircle, DollarSign, MapPin,
-  User, Loader2, Building2, Home, X
+  ArrowLeft, CheckCircle2, XCircle,
+  Loader2, Home, X
 } from 'lucide-react';
 import { logAudit } from '../../services/auditService';
 import { orderAppraisal, type AppraisalClassification } from '../../services/valoraAppraisalService';

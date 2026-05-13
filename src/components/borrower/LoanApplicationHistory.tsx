@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
 import {
   FileText, Calendar, Home, DollarSign, Clock, CheckCircle,
-  XCircle, AlertCircle, ChevronRight, Search, Filter, Download,
-  Building, TrendingUp, Eye, ArrowUpDown, X, Trash2, CheckSquare, Square, Loader2
+  XCircle, ChevronRight, Search, Filter,
+  Building, TrendingUp, Eye, ArrowUpDown, X, Trash2, CheckSquare, Square
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { generatePreApprovalPdfHtml, downloadPdf, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
 
 interface LoanApplication {
   id: string;
@@ -57,20 +56,19 @@ const LOAN_TYPE_LABELS: Record<string, string> = {
   purchase: 'Purchase',
 };
 
-export function LoanApplicationHistory({ onBack, onSelectApplication, onContinueDraft }: Props) {
-  const { user, userAccount } = useAuth();
+export function LoanApplicationHistory({ onBack: _onBack, onSelectApplication, onContinueDraft }: Props) {
+  const { user } = useAuth();
   const [applications, setApplications] = useState<LoanApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [sortField, setSortField] = useState<'created_at' | 'updated_at' | 'amount'>('created_at');
+  const [sortField] = useState<'created_at' | 'updated_at' | 'amount'>('created_at');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [showFilters, setShowFilters] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; source: 'intake' | 'application' } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -234,7 +232,7 @@ export function LoanApplicationHistory({ onBack, onSelectApplication, onContinue
       const intakeIds = appsToDelete.filter(a => a.source === 'intake').map(a => a.id);
       const applicationIds = appsToDelete.filter(a => a.source === 'application').map(a => a.id);
 
-      const deletePromises: Promise<unknown>[] = [];
+      const deletePromises: PromiseLike<unknown>[] = [];
 
       if (intakeIds.length > 0) {
         deletePromises.push(
@@ -297,117 +295,6 @@ export function LoanApplicationHistory({ onBack, onSelectApplication, onContinue
 
   const getStatusConfig = (status: string) => {
     return STATUS_CONFIG[status] || STATUS_CONFIG.draft;
-  };
-
-  const handleDownloadPreApproval = async (app: LoanApplication) => {
-    if (!user) return;
-
-    setDownloadingId(app.id);
-    try {
-      const { data: preApprovalData } = await supabase
-        .from('pre_approvals')
-        .select(`
-          id,
-          status,
-          recommended_amount,
-          qualification_min,
-          qualification_max,
-          passes_liquidity_check,
-          created_at,
-          requested_loan_amount,
-          verified_liquidity,
-          required_liquidity,
-          borrower_type,
-          loan_type,
-          estimated_purchase_price,
-          property_state,
-          conditions,
-          expires_at
-        `)
-        .eq('intake_submission_id', app.id)
-        .maybeSingle();
-
-      if (!preApprovalData) {
-        alert('Pre-approval letter is not available yet. Please complete the pre-approval process first.');
-        return;
-      }
-
-      const issueDate = new Date(preApprovalData.created_at).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
-      const expirationDate = preApprovalData.expires_at
-        ? new Date(preApprovalData.expires_at).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-          })
-        : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-          });
-
-      const letterData = {
-        id: preApprovalData.id,
-        loanAmount: preApprovalData.requested_loan_amount || preApprovalData.recommended_amount || 0,
-        qualificationMin: preApprovalData.qualification_min || 0,
-        qualificationMax: preApprovalData.qualification_max || 0,
-        loanType: preApprovalData.loan_type || app.loan_type || 'dscr',
-        borrowerType: (preApprovalData.borrower_type as 'individual' | 'entity') || 'individual',
-        propertyState: preApprovalData.property_state || app.property_state || '',
-        purchasePrice: preApprovalData.estimated_purchase_price || app.requested_amount || 0,
-        verifiedLiquidity: preApprovalData.verified_liquidity || 0,
-        requiredLiquidity: preApprovalData.required_liquidity || 0,
-        passesLiquidityCheck: preApprovalData.passes_liquidity_check ?? true,
-        conditions: Array.isArray(preApprovalData.conditions) ? preApprovalData.conditions : [],
-        issueDate,
-        expirationDate,
-      };
-
-      const letterNumber = `PA-${letterData.id.slice(0, 8).toUpperCase()}`;
-
-      const { data: submissionRow } = await supabase
-        .from('intake_submissions')
-        .select('borrower_id')
-        .eq('id', app.id)
-        .maybeSingle();
-      const branding = submissionRow?.borrower_id
-        ? await fetchOrgBrandingForBorrower(submissionRow.borrower_id)
-        : { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
-
-      const htmlContent = generatePreApprovalPdfHtml({
-        ...branding,
-        borrowerName: userAccount?.full_name || user.email?.split('@')[0] || 'Borrower',
-        borrowerType: letterData.borrowerType,
-        loanAmount: letterData.loanAmount,
-        qualificationMin: letterData.qualificationMin,
-        qualificationMax: letterData.qualificationMax,
-        loanType: letterData.loanType,
-        propertyAddress: app.property_address || '',
-        propertyCity: app.property_city || '',
-        propertyState: letterData.propertyState,
-        propertyZip: '',
-        purchasePrice: letterData.purchasePrice,
-        verifiedLiquidity: letterData.verifiedLiquidity,
-        requiredLiquidity: letterData.requiredLiquidity,
-        passesLiquidityCheck: letterData.passesLiquidityCheck,
-        conditions: letterData.conditions,
-        placerBotConditions: [],
-        matchedPrograms: [],
-        issueDate: letterData.issueDate,
-        expirationDate: letterData.expirationDate,
-        letterNumber,
-      });
-
-      downloadPdf(htmlContent, `pre-approval-letter-${letterNumber}.pdf`);
-    } catch (err) {
-      console.error('Error downloading pre-approval:', err);
-      alert('Failed to download pre-approval letter. Please try again.');
-    } finally {
-      setDownloadingId(null);
-    }
   };
 
   const getLoanTypeLabel = (type: string | null | undefined) => {

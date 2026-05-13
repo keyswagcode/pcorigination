@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Upload, DollarSign, MapPin, Building2, ArrowRight, CheckCircle, XCircle, AlertTriangle, Loader as Loader2, FileText, Calendar, Hop as Home, User, ArrowLeft, Download, TrendingUp, Shield, Info, FileCheck, Bot } from 'lucide-react';
+import { Upload, DollarSign, MapPin, Building2, ArrowRight, CheckCircle, AlertTriangle, Loader as Loader2, FileText, Calendar, Hop as Home, User, ArrowLeft, Download, TrendingUp, Shield, Info, FileCheck, Bot } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../team/TeamContext';
@@ -10,7 +10,6 @@ import { getSubmissionState } from '../../services/submissionStateService';
 import {
   resolveFlowStep,
   isDocumentProcessed as isDocProcessed,
-  isDocumentProcessing as isDocProcessing,
   isDocumentFailed as isDocFailed,
   isValidBankAccount as isValidBankAccountLib,
   mapDocumentStatus,
@@ -118,8 +117,8 @@ type BankAccountRow = {
   statement_period_end: string | null;
 };
 
-function isValidBankAccount(acc: BankAccountRow): boolean {
-  return isValidBankAccountLib(acc);
+function isValidBankAccount(acc: unknown): boolean {
+  return isValidBankAccountLib(acc as Parameters<typeof isValidBankAccountLib>[0]);
 }
 
 function buildExtractedDataFromAccounts(accounts: BankAccountRow[]): ExtractedData {
@@ -191,7 +190,7 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
   const [processingStatus, setProcessingStatus] = useState('');
   const [applicationSaved, setApplicationSaved] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [bankDataExists, setBankDataExists] = useState(false);
+  const [, setBankDataExists] = useState(false);
   const [rawBankAccounts, setRawBankAccounts] = useState<BankAccountRow[]>([]);
   const [docsProcessed, setDocsProcessed] = useState(false);
   const [isSubmittingDocs, setIsSubmittingDocs] = useState(false);
@@ -213,7 +212,7 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
   const [idDocumentCountry, setIdDocumentCountry] = useState('US');
   const [idDocumentExpiration, setIdDocumentExpiration] = useState('');
   const [isForeignNational, setIsForeignNational] = useState(false);
-  const [idDocumentFile, setIdDocumentFile] = useState<File | null>(null);
+  const [, setIdDocumentFile] = useState<File | null>(null);
   const [idDocumentUploading, setIdDocumentUploading] = useState(false);
   const [idDocumentUploaded, setIdDocumentUploaded] = useState(false);
   const [idDocumentFileName, setIdDocumentFileName] = useState('');
@@ -390,8 +389,8 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
         if (validBankAccounts.length > 0) {
           setDocsProcessed(true);
           setBankDataExists(true);
-          setRawBankAccounts(validBankAccounts as BankAccountRow[]);
-          setExtractedData(buildExtractedDataFromAccounts(validBankAccounts as BankAccountRow[]));
+          setRawBankAccounts(validBankAccounts as unknown as BankAccountRow[]);
+          setExtractedData(buildExtractedDataFromAccounts(validBankAccounts as unknown as BankAccountRow[]));
         }
 
         const existingLoanAmount = submission.loan_requests?.[0]?.requested_amount
@@ -525,7 +524,7 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
             if (allDraftDocsProcessed && validDraftBankAccounts.length > 0) {
               setDocsProcessed(true);
               setBankDataExists(true);
-              setExtractedData(buildExtractedDataFromAccounts(validDraftBankAccounts as BankAccountRow[]));
+              setExtractedData(buildExtractedDataFromAccounts(validDraftBankAccounts as unknown as BankAccountRow[]));
             }
 
             const draftLoanAmount = existingDraft.loan_requests?.[0]?.requested_amount
@@ -929,7 +928,7 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
         return;
       }
 
-      const preApproval = result.pre_approval as PreApprovalResult;
+      const preApproval = result.pre_approval as unknown as PreApprovalResult;
       setPreApprovalResult(preApproval);
 
       const verifiedLiquidityForGuard = rawBankAccounts.length > 0

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { User, FileText, Clock, Building2, DollarSign, Calendar, MoreHorizontal, Loader2, Upload, Eye, CheckCircle } from 'lucide-react';
+import { User, FileText, Clock, Building2, DollarSign, Calendar, MoreHorizontal, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTeam } from '../team/TeamContext';
 
@@ -72,7 +72,7 @@ export function WorkflowPipeline() {
       .not('status', 'eq', 'draft')
       .order('created_at', { ascending: false });
 
-    if (data) setSubmissions(data as Submission[]);
+    if (data) setSubmissions(data as unknown as Submission[]);
     if (error) console.error('Error fetching submissions:', error);
     setLoading(false);
   }, [organization]);

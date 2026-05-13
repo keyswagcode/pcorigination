@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, User, Building2, DollarSign, MapPin, Calendar, FileText, CheckCircle as CheckCircle2, Circle as XCircle, Clock, AlertTriangle, Download, Eye, Loader as Loader2, Phone, Mail, Hop as Home, Banknote, TrendingUp, Shield, Bot, RefreshCw, ExternalLink, Upload, AlertCircle, Search, ChevronDown, ChevronUp, Percent, CreditCard, History, FileCheck, Sparkles, Target, Activity } from 'lucide-react';
+import { ArrowLeft, User, Building2, DollarSign, Calendar, FileText, CheckCircle as CheckCircle2, Circle as XCircle, Clock, AlertTriangle, Download, Eye, Loader as Loader2, Phone, Mail, Hop as Home, Banknote, TrendingUp, Shield, Bot, RefreshCw, Upload, AlertCircle, ChevronDown, ChevronUp, CreditCard, FileCheck, Activity } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useTeam } from '../team/TeamContext';
 import { PlacerBotPanel } from '../placerbot';
@@ -177,7 +177,7 @@ const PROPERTY_TYPE_LABELS: Record<string, string> = {
 };
 
 export function BorrowerManagement({ submissionId, onBack }: BorrowerManagementProps) {
-  const { members } = useTeam();
+  const { members: _members } = useTeam();
   const [submission, setSubmission] = useState<SubmissionDetail | null>(null);
   const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [normalizedAccounts, setNormalizedAccounts] = useState<NormalizedBankAccount[]>([]);
@@ -295,7 +295,7 @@ export function BorrowerManagement({ submissionId, onBack }: BorrowerManagementP
     ]);
 
     if (submissionRes.data) {
-      setSubmission(submissionRes.data);
+      setSubmission(submissionRes.data as unknown as SubmissionDetail);
     }
     setDocuments(docsRes.data || []);
     setNormalizedAccounts(normalizedRes.data || []);

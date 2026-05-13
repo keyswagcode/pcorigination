@@ -155,7 +155,7 @@ export function LenderRulebookPanel({ submissionId }: LenderRulebookPanelProps) 
             snap.property_state || '',
             snap.loan_type || '',
             snap.property_type,
-            { loan_type: p.loan_type, occupancy_types: p.occupancy_types }
+            { loan_type: p.loan_type }
           ),
           checkLoanAmountEligibility(snap.loan_amount ?? 0, p.min_loan_amount, p.max_loan_amount),
         ];

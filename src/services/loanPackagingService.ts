@@ -45,7 +45,7 @@ export async function buildLoanPackage(
       .eq('intake_submission_id', submissionId),
   ]);
 
-  const borrower = borrowerResult.data?.borrowers as { id: string; borrower_name: string; entity_type: string } | null;
+  const borrower = borrowerResult.data?.borrowers as unknown as { id: string; borrower_name: string; entity_type: string } | null;
   const property = propertyResult.data;
   const documents = docsResult.data || [];
   const bankAccounts = bankAccountsResult.data || [];

@@ -87,6 +87,12 @@ export interface Borrower {
   portfolio_value: number | null;
   user_id?: string;
   organization_id?: string | null;
+  broker_id?: string | null;
+  llc_name?: string | null;
+  address_street?: string | null;
+  address_city?: string | null;
+  address_state?: string | null;
+  address_zip?: string | null;
   borrower_status?: BorrowerStatus;
   lifecycle_stage?: LifecycleStage;
   preferred_loan_type?: string | null;
@@ -130,6 +136,13 @@ export interface PrequalResult {
   summary: string | null;
   generated_at: string;
   updated_at: string;
+  // Fields the UI reads but that aren't (yet?) in the prequal_results DB table —
+  // they're undefined at runtime. Marked optional so TS reflects reality;
+  // promote to required once a migration adds the columns to prequal_results.
+  passes_liquidity_check?: boolean | null;
+  verified_liquidity?: number | null;
+  required_liquidity?: number | null;
+  letter_url?: string | null;
 }
 
 export interface BorrowerIdentityDocument {

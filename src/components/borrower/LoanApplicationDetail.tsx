@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import {
   ArrowLeft, FileText, Calendar, Home, DollarSign, Clock, CheckCircle,
-  XCircle, AlertCircle, Download, Upload, Eye, Building, TrendingUp,
-  CreditCard, User, MapPin, Percent, Timer, RefreshCw, ExternalLink, Trash2,
+  XCircle, AlertCircle, Download, Upload, Eye,
+  User, RefreshCw, Trash2,
   Loader as Loader2, Landmark, ArrowDownCircle, ArrowUpCircle, Play
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { generatePreApprovalPdfHtml, downloadPdf, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
 
 interface LoanApplicationFull {
   id: string;
@@ -48,16 +47,16 @@ interface LoanApplicationFull {
     created_at: string;
     estimated_rate_min: number;
     estimated_rate_max: number;
-    requested_loan_amount: number;
-    verified_liquidity: number;
-    required_liquidity: number;
-    borrower_type: string;
-    loan_type: string;
-    estimated_purchase_price: number;
-    property_state: string;
-    conditions: string[];
-    expires_at: string;
-    letter_number: string;
+    requested_loan_amount?: number;
+    verified_liquidity?: number;
+    required_liquidity?: number;
+    borrower_type?: string;
+    loan_type?: string;
+    estimated_purchase_price?: number;
+    property_state?: string;
+    conditions?: string[];
+    expires_at?: string;
+    letter_number?: string;
   } | null;
   documents: {
     id: string;
@@ -499,64 +498,7 @@ export function LoanApplicationDetail({ applicationId, source = 'intake', initia
     return stageMap[stage] ?? 0;
   };
 
-  const handleDownloadPreApprovalLetter = async () => {
-    if (!application?.pre_approval) return;
-
-    const preApproval = application.pre_approval;
-    const { data: submission } = await supabase
-      .from('intake_submissions')
-      .select('borrower_id')
-      .eq('id', applicationId)
-      .maybeSingle();
-    const branding = submission?.borrower_id
-      ? await fetchOrgBrandingForBorrower(submission.borrower_id)
-      : { orgName: 'Key Real Estate Capital', orgLogoUrl: null };
-    const issueDate = new Date(preApproval.created_at).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-    const expirationDate = preApproval.expires_at
-      ? new Date(preApproval.expires_at).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        })
-      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        });
-
-    const htmlContent = generatePreApprovalPdfHtml({
-      ...branding,
-      borrowerName: application.borrower?.borrower_name || 'Borrower',
-      borrowerType: preApproval.borrower_type as 'individual' | 'entity',
-      loanAmount: preApproval.requested_loan_amount || preApproval.recommended_amount,
-      qualificationMin: preApproval.qualification_min,
-      qualificationMax: preApproval.qualification_max,
-      loanType: preApproval.loan_type || application.loan_request?.loan_type || 'dscr',
-      propertyAddress: application.property?.property_address || '',
-      propertyCity: application.property?.property_city || '',
-      propertyState: application.property?.property_state || preApproval.property_state || '',
-      propertyZip: application.property?.property_zip || '',
-      purchasePrice: preApproval.estimated_purchase_price || application.property?.estimated_value || 0,
-      verifiedLiquidity: preApproval.verified_liquidity,
-      requiredLiquidity: preApproval.required_liquidity,
-      passesLiquidityCheck: preApproval.passes_liquidity_check,
-      conditions: preApproval.conditions,
-      placerBotConditions: [],
-      matchedPrograms: [],
-      issueDate,
-      expirationDate,
-      letterNumber: preApproval.letter_number,
-      creditScore: application.borrower?.credit_score,
-    });
-
-    downloadPdf(htmlContent, `pre-approval-letter-${preApproval.letter_number}.pdf`);
-  };
-
-  const handleDownloadDocument = async (doc: typeof application.documents[0]) => {
+  const handleDownloadDocument = async (doc: NonNullable<typeof application>['documents'][0]) => {
     if (!doc.file_path) {
       alert('Document file not available');
       return;
@@ -583,7 +525,7 @@ export function LoanApplicationDetail({ applicationId, source = 'intake', initia
     }
   };
 
-  const handleViewDocument = async (doc: typeof application.documents[0]) => {
+  const handleViewDocument = async (doc: NonNullable<typeof application>['documents'][0]) => {
     if (!doc.file_path) {
       alert('Document file not available');
       return;

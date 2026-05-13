@@ -103,6 +103,7 @@ interface MatchedProgram {
 
 interface PreApprovalResult {
   status: string;
+  sub_status?: string;
   requested_loan_amount: number;
   verified_liquidity: number;
   required_liquidity: number;
@@ -118,6 +119,7 @@ interface PreApprovalResult {
   machine_decision: string;
   machine_confidence: number;
   letter_number: string;
+  has_qualifying_lender?: boolean;
 }
 
 interface NewLoanApplicationProps {
@@ -127,7 +129,7 @@ interface NewLoanApplicationProps {
   forceNew?: boolean;
 }
 
-export function NewLoanApplication({ onComplete, onCancel, existingSubmissionId, forceNew }: NewLoanApplicationProps) {
+export function NewLoanApplication({ onComplete, onCancel: _onCancel, existingSubmissionId, forceNew }: NewLoanApplicationProps) {
   const { user, userAccount } = useAuth();
   const [step, setStep] = useState<ApplicationStep>('loan-info');
   const [borrowerId, setBorrowerId] = useState<string | null>(null);
@@ -849,7 +851,7 @@ export function NewLoanApplication({ onComplete, onCancel, existingSubmissionId,
 
       setProcessingStatus('Running pre-approval analysis with PlacerBot...');
       const result = await runPlacerBot(submissionId, loanPackage);
-      setPreApprovalResult(result.pre_approval);
+      setPreApprovalResult(result.pre_approval as unknown as PreApprovalResult);
 
       console.log('PlacerBot completed:', {
         sub_status: result.pre_approval?.sub_status,

@@ -82,7 +82,7 @@ export function BorrowerQueuePage() {
       const { data } = await query.limit(100);
       const rows = (data || []) as BorrowerQueueItem[];
 
-      const brokerIds = Array.from(new Set(rows.map(b => (b as Record<string, unknown>).broker_id as string).filter(Boolean)));
+      const brokerIds = Array.from(new Set(rows.map(b => b.broker_id).filter((id): id is string => !!id)));
       if (brokerIds.length > 0) {
         const { data: brokers } = await supabase
           .from('user_accounts')
@@ -90,8 +90,7 @@ export function BorrowerQueuePage() {
           .in('id', brokerIds);
         const byId = new Map((brokers || []).map(b => [b.id, b]));
         for (const r of rows) {
-          const brokerId = (r as Record<string, unknown>).broker_id as string | undefined;
-          const broker = brokerId ? byId.get(brokerId) : undefined;
+          const broker = r.broker_id ? byId.get(r.broker_id) : undefined;
           r.owner_name = broker
             ? [broker.first_name, broker.last_name].filter(Boolean).join(' ') || broker.email || 'Owner'
             : undefined;
@@ -158,9 +157,9 @@ export function BorrowerQueuePage() {
     return b.borrower_name?.toLowerCase().includes(q)
       || b.email?.toLowerCase().includes(q)
       || (queryDigits && phone.includes(queryDigits))
-      || (b as Record<string, unknown>).llc_name?.toString().toLowerCase().includes(q)
-      || (b as Record<string, unknown>).address_street?.toString().toLowerCase().includes(q)
-      || (b as Record<string, unknown>).address_city?.toString().toLowerCase().includes(q)
+      || b.llc_name?.toLowerCase().includes(q)
+      || b.address_street?.toLowerCase().includes(q)
+      || b.address_city?.toLowerCase().includes(q)
       || b.state_of_residence?.toLowerCase().includes(q);
   });
 

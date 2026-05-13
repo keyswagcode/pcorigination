@@ -4,8 +4,8 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../components/team/TeamContext';
 import {
-  Users, FileText, CheckCircle2, Clock, AlertCircle,
-  DollarSign, Loader2, Copy, Check, ArrowRight, Search
+  Users,
+  Loader2, Copy, Check, ArrowRight, Search
 } from 'lucide-react';
 import { logAudit } from '../../services/auditService';
 import type { OrganizationMember } from '../../shared/types';

@@ -35,6 +35,7 @@ interface Borrower {
   ssn_encrypted: string | null;
   ssn_last4: string | null;
   credit_consent: boolean | null;
+  llc_name: string | null;
   created_at: string;
 }
 
@@ -569,7 +570,7 @@ export function BrokerBorrowerDetailPage() {
         orgName,
         orgLogoUrl,
         borrowerName: borrower.borrower_name,
-        llcName: (borrower as Record<string, unknown>).llc_name as string || null,
+        llcName: borrower.llc_name,
         preApprovalAmount: pa.prequalified_amount,
         loanType: pa.loan_type || 'dscr',
         loanPurpose: 'purchase',
@@ -629,7 +630,7 @@ export function BrokerBorrowerDetailPage() {
       alert('Failed to generate bank statements.');
     } finally {
       setGeneratingStatements(false);
-      setStatementMenuOpen(false);
+      setStatementMenuOpen(null);
     }
   };
 
