@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { usePlaidLink } from 'react-plaid-link';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -498,15 +498,10 @@ export function BorrowerHomePage() {
   }
 
   if (!borrower) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">No Profile Found</h2>
-          <p className="text-gray-500">Please complete your application signup first.</p>
-        </div>
-      </div>
-    );
+    // First time here — send them to the profile form to complete intake
+    // before they can see the dashboard. The profile page enforces every
+    // field needed for the 1003 / credit pull / pre-approval downstream.
+    return <Navigate to="/application/profile" replace />;
   }
 
   return (

@@ -138,8 +138,62 @@ export function BorrowerProfilePage() {
     }
   }
 
+  function validate(): string | null {
+    if (!borrower.borrower_name?.trim()) return 'Full name is required.';
+    if (!borrower.email?.trim()) return 'Email is required.';
+    if (!borrower.phone?.trim()) return 'Phone is required.';
+    const street = (borrower as Record<string, unknown>).address_street as string;
+    const city = (borrower as Record<string, unknown>).address_city as string;
+    const state = ((borrower as Record<string, unknown>).address_state as string) || borrower.state_of_residence;
+    const zip = (borrower as Record<string, unknown>).address_zip as string;
+    if (!street || !city || !state || !zip) return 'Residential address (street, city, state, zip) is required.';
+    if (!borrower.credit_score) return 'Credit score is required.';
+    const dob = (borrower as Record<string, unknown>).date_of_birth as string;
+    if (!dob) return 'Date of birth is required.';
+    if (ssnInput.replace(/\D/g, '').length !== 9) return 'A 9-digit Social Security Number is required.';
+    if (!borrower.marital_status) return 'Marital status is required.';
+    if (borrower.address_years_at == null && borrower.address_months_at == null) {
+      return 'Please enter how long you have lived at your current address.';
+    }
+    if (!borrower.housing_type) return 'Please indicate whether you Own, Rent, or Live rent free.';
+    if (borrower.housing_type === 'rent' && !borrower.monthly_housing_expense) {
+      return 'Monthly rent is required when renting.';
+    }
+    if (currentTenureMonths + previousTenureMonths < 24) {
+      return `Lenders need at least 2 years of housing history. Add a previous address (${24 - currentTenureMonths - previousTenureMonths} more months needed).`;
+    }
+    for (let i = 0; i < previousAddresses.length; i++) {
+      const a = previousAddresses[i];
+      if (!a.address_street || !a.address_city || !a.address_state || !a.address_zip) {
+        return `Previous address #${i + 1}: street, city, state, and zip are required.`;
+      }
+      if (a.years_at == null && a.months_at == null) {
+        return `Previous address #${i + 1}: how long you lived there is required.`;
+      }
+      if (!a.housing_type) {
+        return `Previous address #${i + 1}: housing type is required.`;
+      }
+      if (a.housing_type === 'rent' && !a.monthly_housing_expense) {
+        return `Previous address #${i + 1}: monthly rent is required when renting.`;
+      }
+    }
+    if (!borrower.preferred_loan_type || borrower.preferred_loan_type === '') {
+      return 'Please pick a loan type (or "Not sure").';
+    }
+    return null;
+  }
+
+  const [validationError, setValidationError] = useState<string | null>(null);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const err = validate();
+    if (err) {
+      setValidationError(err);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setValidationError(null);
     setSaving(true);
     setSaved(false);
 
@@ -229,7 +283,13 @@ export function BorrowerProfilePage() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+        {validationError && (
+          <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            {validationError}
+          </div>
+        )}
+
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -272,7 +332,7 @@ export function BorrowerProfilePage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Phone
+                Phone *
               </label>
               <input
                 type="tel"
@@ -285,7 +345,7 @@ export function BorrowerProfilePage() {
 
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Residential Address
+                Residential Address *
               </label>
               <input
                 type="text"
@@ -324,7 +384,7 @@ export function BorrowerProfilePage() {
               {/* Tenure at current address */}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Years at this address</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Years at this address *</label>
                   <input
                     type="number"
                     min={0}
@@ -351,7 +411,7 @@ export function BorrowerProfilePage() {
 
               {/* Housing type */}
               <div className="mt-3">
-                <label className="block text-xs font-medium text-gray-600 mb-1">Do you own, rent, or live rent free here?</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Do you own, rent, or live rent free here? *</label>
                 <div className="grid grid-cols-3 gap-2">
                   {HOUSING_TYPES.map(opt => (
                     <label
@@ -548,7 +608,7 @@ export function BorrowerProfilePage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Date of Birth
+                Date of Birth *
               </label>
               <input
                 type="date"
@@ -560,7 +620,7 @@ export function BorrowerProfilePage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Marital Status
+                Marital Status *
               </label>
               <select
                 value={borrower.marital_status || ''}
@@ -576,7 +636,7 @@ export function BorrowerProfilePage() {
 
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Social Security Number
+                Social Security Number *
               </label>
               <div className="relative">
                 <input
