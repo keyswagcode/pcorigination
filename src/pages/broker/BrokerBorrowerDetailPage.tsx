@@ -37,7 +37,25 @@ interface Borrower {
   credit_consent: boolean | null;
   llc_name: string | null;
   marital_status: 'single' | 'married' | 'divorced' | 'widowed' | null;
+  address_years_at: number | null;
+  address_months_at: number | null;
+  housing_type: 'own' | 'rent' | 'rent_free' | null;
+  monthly_housing_expense: number | null;
   created_at: string;
+}
+
+interface PreviousAddressRow {
+  id: string;
+  borrower_id: string;
+  address_street: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  address_zip: string | null;
+  years_at: number | null;
+  months_at: number | null;
+  housing_type: 'own' | 'rent' | 'rent_free' | null;
+  monthly_housing_expense: number | null;
+  sequence_order: number;
 }
 
 interface UploadedDoc {
@@ -118,6 +136,7 @@ export function BrokerBorrowerDetailPage() {
   const { user, userAccount } = useAuth();
   const [borrower, setBorrower] = useState<Borrower | null>(null);
   const [coBorrowers, setCoBorrowers] = useState<CoBorrower[]>([]);
+  const [previousAddresses, setPreviousAddresses] = useState<PreviousAddressRow[]>([]);
   const [documents, setDocuments] = useState<UploadedDoc[]>([]);
   const [preApprovals, setPreApprovals] = useState<PreApproval[]>([]);
   const [loans, setLoans] = useState<LoanScenario[]>([]);
@@ -293,7 +312,7 @@ export function BrokerBorrowerDetailPage() {
   const loadData = useCallback(async () => {
     if (!borrowerId) return;
 
-    const [bRes, dRes, paRes, lRes, nRes, aRes, cbRes] = await Promise.all([
+    const [bRes, dRes, paRes, lRes, nRes, aRes, cbRes, prevAddrRes] = await Promise.all([
       supabase.from('borrowers').select('*').eq('id', borrowerId).maybeSingle(),
       supabase.from('uploaded_documents').select('id, document_type, document_subtype, file_name, file_path, processing_status, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('pre_approvals').select('id, loan_type, prequalified_amount, status, verified_liquidity').eq('borrower_id', borrowerId),
@@ -301,6 +320,7 @@ export function BrokerBorrowerDetailPage() {
       supabase.from('borrower_notes').select('id, content, user_id, created_at, user_accounts(first_name, last_name)').eq('borrower_id', borrowerId).order('created_at', { ascending: false }),
       supabase.from('borrower_activity_log').select('id, event_type, title, details, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: false }).limit(50),
       supabase.from('co_borrowers').select('id, borrower_name, email, phone, date_of_birth, ssn_last4, ssn_encrypted, credit_score, address_street, address_city, address_state, address_zip, status, filled_by_self, created_at').eq('borrower_id', borrowerId).order('created_at', { ascending: true }),
+      supabase.from('borrower_previous_addresses').select('*').eq('borrower_id', borrowerId).order('sequence_order', { ascending: true }),
     ]);
 
     const { data: profile } = await supabase
@@ -318,6 +338,7 @@ export function BrokerBorrowerDetailPage() {
 
     setBorrower(bRes.data);
     setCoBorrowers(cbRes.data || []);
+    setPreviousAddresses(prevAddrRes.data || []);
     setDocuments(dRes.data || []);
     setPreApprovals(paRes.data || []);
     setLoans(lRes.data || []);
@@ -704,6 +725,7 @@ export function BrokerBorrowerDetailPage() {
         b: Borrower | CoBorrower,
         profileMonthly: number | null,
         profileLiquidity: number | null,
+        prevAddresses: PreviousAddressRow[] = [],
       ) => ({
         borrowerName: b.borrower_name || '',
         email: b.email,
@@ -721,13 +743,27 @@ export function BrokerBorrowerDetailPage() {
         monthlyIncome: profileMonthly,
         liquidity: profileLiquidity,
         maritalStatus: 'marital_status' in b ? (b.marital_status as 'single' | 'married' | 'divorced' | 'widowed' | null | undefined) ?? null : null,
+        housingYearsAt: 'address_years_at' in b ? b.address_years_at : null,
+        housingMonthsAt: 'address_months_at' in b ? b.address_months_at : null,
+        housingType: 'housing_type' in b ? b.housing_type : null,
+        monthlyHousingExpense: 'monthly_housing_expense' in b ? b.monthly_housing_expense : null,
+        previousAddresses: prevAddresses.map(p => ({
+          addressStreet: p.address_street,
+          addressCity: p.address_city,
+          addressState: p.address_state,
+          addressZip: p.address_zip,
+          yearsAt: p.years_at,
+          monthsAt: p.months_at,
+          housingType: p.housing_type,
+          monthlyHousingExpense: p.monthly_housing_expense,
+        })),
         isFirstTimeInvestor: false,
         isForeignNational: false,
       });
 
       const generatorOpts = {
-        primary: toBorrowerInput(borrower, profile?.monthly_income ?? null, profile?.liquidity_estimate ?? null),
-        coBorrowers: coBorrowers.map(co => toBorrowerInput(co, null, null)),
+        primary: toBorrowerInput(borrower, profile?.monthly_income ?? null, profile?.liquidity_estimate ?? null, previousAddresses),
+        coBorrowers: coBorrowers.map(co => toBorrowerInput(co, null, null, [])),
         loan: loanInput,
         orgName,
         brokerName,

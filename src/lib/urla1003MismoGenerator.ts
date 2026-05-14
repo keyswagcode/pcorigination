@@ -310,7 +310,77 @@ function buildBorrowerParty(b: URLA1003BorrowerInput, roleType: 'Borrower'): str
     }, 'Current')
   );
 
-  return wrap('PARTY', [individual, taxpayer, roles, addresses].join(''));
+  // RESIDENCES — current + any prior addresses (URLA requires when current tenure < 2 years)
+  const residenceNodes: string[] = [];
+  residenceNodes.push(buildResidence({
+    street: b.addressStreet,
+    city: b.addressCity,
+    state: b.addressState,
+    zip: b.addressZip,
+    yearsAt: b.housingYearsAt ?? null,
+    monthsAt: b.housingMonthsAt ?? null,
+    housingType: b.housingType ?? null,
+    monthlyHousingExpense: b.monthlyHousingExpense ?? null,
+    residencyType: 'Current',
+  }));
+  for (const prev of b.previousAddresses || []) {
+    residenceNodes.push(buildResidence({
+      street: prev.addressStreet,
+      city: prev.addressCity,
+      state: prev.addressState,
+      zip: prev.addressZip,
+      yearsAt: prev.yearsAt,
+      monthsAt: prev.monthsAt,
+      housingType: prev.housingType,
+      monthlyHousingExpense: prev.monthlyHousingExpense,
+      residencyType: 'Prior',
+    }));
+  }
+  const residences = wrap('RESIDENCES', residenceNodes.join(''));
+
+  return wrap('PARTY', [individual, taxpayer, roles, addresses, residences].join(''));
+}
+
+function buildResidence(r: {
+  street: string | null | undefined;
+  city: string | null | undefined;
+  state: string | null | undefined;
+  zip: string | null | undefined;
+  yearsAt: number | null;
+  monthsAt: number | null;
+  housingType: 'own' | 'rent' | 'rent_free' | null;
+  monthlyHousingExpense: number | null;
+  residencyType: 'Current' | 'Prior';
+}): string {
+  // MISMO BorrowerResidencyBasisType: Own | Rent | LivingRentFree
+  const basisType =
+    r.housingType === 'own' ? 'Own' :
+    r.housingType === 'rent' ? 'Rent' :
+    r.housingType === 'rent_free' ? 'LivingRentFree' :
+    '';
+
+  const detail = wrap('RESIDENCE_DETAIL', [
+    tag('BorrowerResidencyType', r.residencyType),
+    tag('BorrowerResidencyDurationYearsCount', r.yearsAt != null ? String(r.yearsAt) : ''),
+    tag('BorrowerResidencyDurationMonthsCount', r.monthsAt != null ? String(r.monthsAt) : ''),
+    tag('BorrowerResidencyBasisType', basisType),
+  ].join(''));
+
+  const address = buildAddress({
+    street: r.street ?? null,
+    city: r.city ?? null,
+    state: r.state ?? null,
+    zip: r.zip ?? null,
+  }, r.residencyType === 'Current' ? 'Current' : 'Prior');
+
+  // Monthly rent only emitted for renters
+  const rent = r.housingType === 'rent' && r.monthlyHousingExpense != null
+    ? wrap('MONTHLY_RENT', [
+        tag('MonthlyRentAmount', String(r.monthlyHousingExpense)),
+      ].join(''))
+    : '';
+
+  return wrap('RESIDENCE', [detail, address, rent].join(''));
 }
 
 function buildOriginatorParty(opts: URLA1003Options): string {

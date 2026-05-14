@@ -24,8 +24,24 @@ export interface URLA1003BorrowerInput {
   monthlyIncome: number | null;
   liquidity: number | null;
   maritalStatus?: 'single' | 'married' | 'divorced' | 'widowed' | null;
+  housingYearsAt?: number | null;
+  housingMonthsAt?: number | null;
+  housingType?: 'own' | 'rent' | 'rent_free' | null;
+  monthlyHousingExpense?: number | null;
+  previousAddresses?: URLA1003PreviousAddress[];
   isFirstTimeInvestor?: boolean;
   isForeignNational?: boolean;
+}
+
+export interface URLA1003PreviousAddress {
+  addressStreet: string | null;
+  addressCity: string | null;
+  addressState: string | null;
+  addressZip: string | null;
+  yearsAt: number | null;
+  monthsAt: number | null;
+  housingType: 'own' | 'rent' | 'rent_free' | null;
+  monthlyHousingExpense: number | null;
 }
 
 export interface URLA1003LoanInput {
@@ -83,6 +99,20 @@ function fmtDate(s: string | null | undefined): string {
 function val(s: string | number | null | undefined, fallback = BLANK): string {
   if (s == null || s === '') return fallback;
   return String(s);
+}
+
+function formatTenure(years: number | null | undefined, months: number | null | undefined): string {
+  const y = years || 0;
+  const m = months || 0;
+  if (y === 0 && m === 0) return BLANK;
+  return `${y} yr${y === 1 ? '' : 's'} ${m} mo${m === 1 ? '' : 's'}`;
+}
+
+function housingLabel(t: 'own' | 'rent' | 'rent_free' | null | undefined): string {
+  if (t === 'own') return '☒ Own  ☐ Rent  ☐ No primary housing expense';
+  if (t === 'rent') return '☐ Own  ☒ Rent  ☐ No primary housing expense';
+  if (t === 'rent_free') return '☐ Own  ☐ Rent  ☒ No primary housing expense';
+  return '☐ Own  ☐ Rent  ☐ No primary housing expense';
 }
 
 const LOAN_PURPOSE_LABEL: Record<string, string> = {
@@ -289,10 +319,32 @@ export async function generateURLA1003Pdf(opts: URLA1003Options): Promise<void> 
       { label: 'Country', value: 'USA', weight: 1 },
     ], b.borrowerName);
     fieldRow([
-      { label: 'How Long at Current Address?', value: BLANK, weight: 2 },
-      { label: 'Housing', value: 'No primary housing expense / Own / Rent', weight: 3 },
-      { label: 'Monthly Housing Expense', value: BLANK, weight: 2 },
+      { label: 'How Long at Current Address?', value: formatTenure(b.housingYearsAt, b.housingMonthsAt), weight: 2 },
+      { label: 'Housing', value: housingLabel(b.housingType), weight: 3 },
+      { label: 'Monthly Housing Expense', value: b.housingType === 'rent' ? fmtCurrency(b.monthlyHousingExpense ?? null) : (b.housingType === 'rent_free' ? '$0 (rent free)' : (b.housingType === 'own' ? fmtCurrency(b.monthlyHousingExpense ?? null) : BLANK)), weight: 2 },
     ], b.borrowerName);
+
+    // Former Address(es) — required if current tenure < 2 years
+    if (b.previousAddresses && b.previousAddresses.length > 0) {
+      subsection('Former Address(es) — required if at current address < 2 years', b.borrowerName);
+      for (const prev of b.previousAddresses) {
+        fieldRow([
+          { label: 'Street', value: val(prev.addressStreet), weight: 4 },
+          { label: 'Unit #', value: BLANK_SHORT, weight: 1 },
+        ], b.borrowerName);
+        fieldRow([
+          { label: 'City', value: val(prev.addressCity), weight: 3 },
+          { label: 'State', value: val(prev.addressState), weight: 1 },
+          { label: 'ZIP', value: val(prev.addressZip), weight: 1 },
+          { label: 'Country', value: 'USA', weight: 1 },
+        ], b.borrowerName);
+        fieldRow([
+          { label: 'How Long at This Address?', value: formatTenure(prev.yearsAt, prev.monthsAt), weight: 2 },
+          { label: 'Housing', value: housingLabel(prev.housingType), weight: 3 },
+          { label: 'Monthly Housing Expense', value: prev.housingType ? fmtCurrency(prev.monthlyHousingExpense) : BLANK, weight: 2 },
+        ], b.borrowerName);
+      }
+    }
 
     // 1b. Current Employment/Self-Employment and Income
     subsection('1b. Current Employment / Self-Employment and Income', b.borrowerName);

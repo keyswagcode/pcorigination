@@ -94,6 +94,10 @@ export interface Borrower {
   address_state?: string | null;
   address_zip?: string | null;
   marital_status?: 'single' | 'married' | 'divorced' | 'widowed' | null;
+  address_years_at?: number | null;
+  address_months_at?: number | null;
+  housing_type?: 'own' | 'rent' | 'rent_free' | null;
+  monthly_housing_expense?: number | null;
   borrower_status?: BorrowerStatus;
   lifecycle_stage?: LifecycleStage;
   preferred_loan_type?: string | null;
@@ -106,6 +110,22 @@ export interface Borrower {
   id_document_file_path?: string | null;
   id_document_file_name?: string | null;
   id_document_uploaded_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface BorrowerPreviousAddress {
+  id: string;
+  borrower_id: string;
+  address_street: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  address_zip: string | null;
+  years_at: number | null;
+  months_at: number | null;
+  housing_type: 'own' | 'rent' | 'rent_free' | null;
+  monthly_housing_expense: number | null;
+  sequence_order: number;
   created_at?: string;
   updated_at?: string;
 }

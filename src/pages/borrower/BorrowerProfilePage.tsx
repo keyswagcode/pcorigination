@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import type { Borrower } from '../../shared/types';
-import { User, Building2, Save, Loader2, CheckCircle, FileText, UserPlus, Trash2, Send, Eye, EyeOff, Shield } from 'lucide-react';
+import type { Borrower, BorrowerPreviousAddress } from '../../shared/types';
+import { User, Building2, Save, Loader2, CheckCircle, FileText, UserPlus, Trash2, Send, Eye, EyeOff, Shield, Plus, Home } from 'lucide-react';
 
 const LOAN_TYPES = [
   { value: 'bank_statement', label: 'Bank Statement', description: 'Use bank deposits to qualify instead of tax returns' },
@@ -26,6 +26,30 @@ const MARITAL_STATUSES: { value: NonNullable<Borrower['marital_status']>; label:
   { value: 'divorced', label: 'Divorced' },
   { value: 'widowed', label: 'Widowed' },
 ];
+
+const HOUSING_TYPES: { value: NonNullable<Borrower['housing_type']>; label: string }[] = [
+  { value: 'own', label: 'Own' },
+  { value: 'rent', label: 'Rent' },
+  { value: 'rent_free', label: 'Live rent free' },
+];
+
+type PreviousAddressDraft = Omit<BorrowerPreviousAddress, 'id' | 'borrower_id' | 'created_at' | 'updated_at'> & { id?: string };
+
+const EMPTY_PREV_ADDRESS: PreviousAddressDraft = {
+  address_street: '',
+  address_city: '',
+  address_state: '',
+  address_zip: '',
+  years_at: null,
+  months_at: null,
+  housing_type: null,
+  monthly_housing_expense: null,
+  sequence_order: 0,
+};
+
+function totalMonths(years: number | null | undefined, months: number | null | undefined): number {
+  return (years || 0) * 12 + (months || 0);
+}
 
 const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -61,6 +85,11 @@ export function BorrowerProfilePage() {
     properties_owned_count: 0,
     preferred_loan_type: 'not_sure'
   });
+  const [previousAddresses, setPreviousAddresses] = useState<PreviousAddressDraft[]>([]);
+
+  const currentTenureMonths = totalMonths(borrower.address_years_at, borrower.address_months_at);
+  const previousTenureMonths = previousAddresses.reduce((sum, a) => sum + totalMonths(a.years_at, a.months_at), 0);
+  const needsAnotherPreviousAddress = currentTenureMonths > 0 && currentTenureMonths + previousTenureMonths < 24;
 
   useEffect(() => {
     if (user) {
@@ -81,6 +110,13 @@ export function BorrowerProfilePage() {
         setBorrower(data);
         const storedSsn = (data as Record<string, unknown>).ssn_encrypted as string | null;
         if (storedSsn) setSsnInput(formatSsnDisplay(storedSsn));
+
+        const { data: prev } = await supabase
+          .from('borrower_previous_addresses')
+          .select('*')
+          .eq('borrower_id', data.id)
+          .order('sequence_order', { ascending: true });
+        if (prev) setPreviousAddresses(prev);
       } else {
         const { data: userAccount } = await supabase
           .from('user_accounts')
@@ -124,6 +160,7 @@ export function BorrowerProfilePage() {
         } : {}),
       };
 
+      let borrowerIdForAddresses = borrower.id;
       if (borrower.id) {
         await supabase
           .from('borrowers')
@@ -138,6 +175,30 @@ export function BorrowerProfilePage() {
 
         if (data) {
           setBorrower(data);
+          borrowerIdForAddresses = data.id;
+        }
+      }
+
+      // Persist previous addresses: drop everything, re-insert. The list is
+      // small (rarely more than 2-3) and the UI is the source of truth.
+      if (borrowerIdForAddresses) {
+        await supabase.from('borrower_previous_addresses').delete().eq('borrower_id', borrowerIdForAddresses);
+        const rowsToInsert = previousAddresses
+          .filter(a => a.address_street || a.address_city || a.years_at != null)
+          .map((a, i) => ({
+            borrower_id: borrowerIdForAddresses,
+            address_street: a.address_street || null,
+            address_city: a.address_city || null,
+            address_state: a.address_state || null,
+            address_zip: a.address_zip || null,
+            years_at: a.years_at,
+            months_at: a.months_at,
+            housing_type: a.housing_type,
+            monthly_housing_expense: a.monthly_housing_expense,
+            sequence_order: i,
+          }));
+        if (rowsToInsert.length > 0) {
+          await supabase.from('borrower_previous_addresses').insert(rowsToInsert);
         }
       }
 
@@ -259,6 +320,211 @@ export function BorrowerProfilePage() {
                   placeholder="Zip"
                 />
               </div>
+
+              {/* Tenure at current address */}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Years at this address</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={99}
+                    value={borrower.address_years_at ?? ''}
+                    onChange={e => setBorrower({ ...borrower, address_years_at: e.target.value === '' ? null : Math.max(0, parseInt(e.target.value) || 0) })}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Months</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={11}
+                    value={borrower.address_months_at ?? ''}
+                    onChange={e => setBorrower({ ...borrower, address_months_at: e.target.value === '' ? null : Math.min(11, Math.max(0, parseInt(e.target.value) || 0)) })}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              {/* Housing type */}
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Do you own, rent, or live rent free here?</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {HOUSING_TYPES.map(opt => (
+                    <label
+                      key={opt.value}
+                      className={`flex items-center justify-center gap-1.5 px-3 py-2 border-2 rounded-lg cursor-pointer text-sm transition-all ${
+                        borrower.housing_type === opt.value
+                          ? 'border-teal-500 bg-teal-50 text-teal-900 font-medium'
+                          : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="housing_type"
+                        value={opt.value}
+                        checked={borrower.housing_type === opt.value}
+                        onChange={() => setBorrower({ ...borrower, housing_type: opt.value })}
+                        className="sr-only"
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {borrower.housing_type === 'rent' && (
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Monthly rent ($)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={borrower.monthly_housing_expense ?? ''}
+                    onChange={e => setBorrower({ ...borrower, monthly_housing_expense: e.target.value === '' ? null : parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                    placeholder="2,500"
+                  />
+                </div>
+              )}
+
+              {/* Previous addresses (URLA requires when current tenure < 2 years) */}
+              {(needsAnotherPreviousAddress || previousAddresses.length > 0) && (
+                <div className="mt-5 pt-5 border-t border-gray-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Home className="w-4 h-4 text-gray-500" />
+                    <h3 className="text-sm font-semibold text-gray-900">Previous addresses</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Lenders need at least 2 years of housing history. Combined tenure so far:{' '}
+                    <span className="font-medium text-gray-700">
+                      {Math.floor((currentTenureMonths + previousTenureMonths) / 12)}y{' '}
+                      {(currentTenureMonths + previousTenureMonths) % 12}m
+                    </span>{' '}
+                    {currentTenureMonths + previousTenureMonths < 24 && (
+                      <span className="text-amber-700">
+                        ({24 - currentTenureMonths - previousTenureMonths} more months needed)
+                      </span>
+                    )}
+                  </p>
+
+                  <div className="space-y-3">
+                    {previousAddresses.map((addr, idx) => (
+                      <div key={idx} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-medium text-gray-600">Previous address #{idx + 1}</span>
+                          <button
+                            type="button"
+                            onClick={() => setPreviousAddresses(previousAddresses.filter((_, i) => i !== idx))}
+                            className="text-xs text-red-600 hover:text-red-700 inline-flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Remove
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          value={addr.address_street || ''}
+                          onChange={e => setPreviousAddresses(previousAddresses.map((a, i) => i === idx ? { ...a, address_street: e.target.value } : a))}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-2"
+                          placeholder="Street address"
+                        />
+                        <div className="grid grid-cols-6 gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={addr.address_city || ''}
+                            onChange={e => setPreviousAddresses(previousAddresses.map((a, i) => i === idx ? { ...a, address_city: e.target.value } : a))}
+                            className="col-span-3 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            placeholder="City"
+                          />
+                          <select
+                            value={addr.address_state || ''}
+                            onChange={e => setPreviousAddresses(previousAddresses.map((a, i) => i === idx ? { ...a, address_state: e.target.value } : a))}
+                            className="col-span-1 px-2 py-2 border border-gray-300 rounded-lg text-sm"
+                          >
+                            <option value="">ST</option>
+                            {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                          <input
+                            type="text"
+                            value={addr.address_zip || ''}
+                            onChange={e => setPreviousAddresses(previousAddresses.map((a, i) => i === idx ? { ...a, address_zip: e.target.value.replace(/\D/g, '').slice(0, 5) } : a))}
+                            className="col-span-2 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            placeholder="Zip"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-0.5">Years</label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={99}
+                              value={addr.years_at ?? ''}
+                              onChange={e => setPreviousAddresses(previousAddresses.map((a, i) => i === idx ? { ...a, years_at: e.target.value === '' ? null : Math.max(0, parseInt(e.target.value) || 0) } : a))}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              placeholder="0"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-0.5">Months</label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={11}
+                              value={addr.months_at ?? ''}
+                              onChange={e => setPreviousAddresses(previousAddresses.map((a, i) => i === idx ? { ...a, months_at: e.target.value === '' ? null : Math.min(11, Math.max(0, parseInt(e.target.value) || 0)) } : a))}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              placeholder="0"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {HOUSING_TYPES.map(opt => (
+                            <label
+                              key={opt.value}
+                              className={`flex items-center justify-center gap-1 px-2 py-1.5 border-2 rounded-md cursor-pointer text-xs transition-all ${
+                                addr.housing_type === opt.value
+                                  ? 'border-teal-500 bg-teal-50 text-teal-900 font-medium'
+                                  : 'border-gray-200 text-gray-700 hover:border-gray-300 bg-white'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`prev_housing_${idx}`}
+                                value={opt.value}
+                                checked={addr.housing_type === opt.value}
+                                onChange={() => setPreviousAddresses(previousAddresses.map((a, i) => i === idx ? { ...a, housing_type: opt.value } : a))}
+                                className="sr-only"
+                              />
+                              {opt.label}
+                            </label>
+                          ))}
+                        </div>
+                        {addr.housing_type === 'rent' && (
+                          <input
+                            type="number"
+                            min={0}
+                            value={addr.monthly_housing_expense ?? ''}
+                            onChange={e => setPreviousAddresses(previousAddresses.map((a, i) => i === idx ? { ...a, monthly_housing_expense: e.target.value === '' ? null : parseFloat(e.target.value) || 0 } : a))}
+                            className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            placeholder="Monthly rent ($)"
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setPreviousAddresses([...previousAddresses, { ...EMPTY_PREV_ADDRESS, sequence_order: previousAddresses.length }])}
+                    className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100"
+                  >
+                    <Plus className="w-4 h-4" /> Add previous address
+                  </button>
+                </div>
+              )}
             </div>
 
             <div>
