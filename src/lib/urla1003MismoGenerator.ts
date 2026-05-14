@@ -269,9 +269,15 @@ function buildBorrowerParty(b: URLA1003BorrowerInput, roleType: 'Borrower'): str
       )
     : '';
 
+  // MISMO only enumerates Married / Separated / Unmarried / NotDisclosed.
+  // Single/Divorced/Widowed all map to Unmarried per Fannie Mae's URLA spec.
+  const maritalStatusType =
+    b.maritalStatus === 'married' ? 'Married' :
+    b.maritalStatus === 'single' || b.maritalStatus === 'divorced' || b.maritalStatus === 'widowed' ? 'Unmarried' :
+    'NotDisclosed';
   const borrowerDetail = wrap('BORROWER_DETAIL', [
     tag('BorrowerBirthDate', dob),
-    tag('MaritalStatusType', 'NotDisclosed'),
+    tag('MaritalStatusType', maritalStatusType),
     tag('CitizenshipResidencyType', b.isForeignNational ? 'NonPermanentResidentAlien' : 'USCitizen'),
   ].join(''));
 

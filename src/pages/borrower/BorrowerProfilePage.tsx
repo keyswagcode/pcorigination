@@ -20,6 +20,13 @@ const ENTITY_TYPES = [
   { value: 'trust', label: 'Trust' },
 ];
 
+const MARITAL_STATUSES: { value: NonNullable<Borrower['marital_status']>; label: string }[] = [
+  { value: 'single', label: 'Single' },
+  { value: 'married', label: 'Married' },
+  { value: 'divorced', label: 'Divorced' },
+  { value: 'widowed', label: 'Widowed' },
+];
+
 const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
   'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
@@ -283,6 +290,22 @@ export function BorrowerProfilePage() {
                 onChange={e => setBorrower({ ...borrower, date_of_birth: e.target.value } as typeof borrower)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Marital Status
+              </label>
+              <select
+                value={borrower.marital_status || ''}
+                onChange={e => setBorrower({ ...borrower, marital_status: (e.target.value || null) as Borrower['marital_status'] })}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              >
+                <option value="">Select...</option>
+                {MARITAL_STATUSES.map(s => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
             </div>
 
             <div className="md:col-span-2">

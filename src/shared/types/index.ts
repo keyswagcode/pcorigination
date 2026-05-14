@@ -93,6 +93,7 @@ export interface Borrower {
   address_city?: string | null;
   address_state?: string | null;
   address_zip?: string | null;
+  marital_status?: 'single' | 'married' | 'divorced' | 'widowed' | null;
   borrower_status?: BorrowerStatus;
   lifecycle_stage?: LifecycleStage;
   preferred_loan_type?: string | null;

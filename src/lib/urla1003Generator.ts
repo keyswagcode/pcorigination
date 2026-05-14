@@ -23,6 +23,7 @@ export interface URLA1003BorrowerInput {
   stateOfResidence: string | null;
   monthlyIncome: number | null;
   liquidity: number | null;
+  maritalStatus?: 'single' | 'married' | 'divorced' | 'widowed' | null;
   isFirstTimeInvestor?: boolean;
   isForeignNational?: boolean;
 }
@@ -261,9 +262,11 @@ export async function generateURLA1003Pdf(opts: URLA1003Options): Promise<void> 
       { label: 'Non-Permanent Resident Alien', checked: !!b.isForeignNational },
     ], b.borrowerName);
     checkboxRow('Marital Status', [
-      { label: 'Married', checked: false },
+      // URLA only has Married / Separated / Unmarried buckets; Single/Divorced/Widowed
+      // all roll up to Unmarried per Fannie Mae's URLA instructions.
+      { label: 'Married', checked: b.maritalStatus === 'married' },
       { label: 'Separated', checked: false },
-      { label: 'Unmarried', checked: false },
+      { label: 'Unmarried', checked: b.maritalStatus === 'single' || b.maritalStatus === 'divorced' || b.maritalStatus === 'widowed' },
     ], b.borrowerName);
     fieldRow([
       { label: 'Dependents (number)', value: BLANK_SHORT, weight: 1 },

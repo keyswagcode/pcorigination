@@ -36,6 +36,7 @@ interface Borrower {
   ssn_last4: string | null;
   credit_consent: boolean | null;
   llc_name: string | null;
+  marital_status: 'single' | 'married' | 'divorced' | 'widowed' | null;
   created_at: string;
 }
 
@@ -719,6 +720,7 @@ export function BrokerBorrowerDetailPage() {
         stateOfResidence: 'state_of_residence' in b ? b.state_of_residence : null,
         monthlyIncome: profileMonthly,
         liquidity: profileLiquidity,
+        maritalStatus: 'marital_status' in b ? (b.marital_status as 'single' | 'married' | 'divorced' | 'widowed' | null | undefined) ?? null : null,
         isFirstTimeInvestor: false,
         isForeignNational: false,
       });
