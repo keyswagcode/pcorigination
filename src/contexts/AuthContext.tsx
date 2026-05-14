@@ -13,6 +13,12 @@ interface UserAccount {
   pos_slug: string | null;
   isc_username: string | null;
   valora_username: string | null;
+  saved_card_last4: string | null;
+  saved_card_brand: string | null;
+  saved_card_holder_name: string | null;
+  saved_card_zip: string | null;
+  saved_card_exp_month: string | null;
+  saved_card_exp_year: string | null;
 }
 
 interface AuthContextValue {
@@ -38,7 +44,7 @@ const AuthContext = createContext<AuthContextValue>({
 async function fetchUserAccount(authUserId: string): Promise<UserAccount | null> {
   const { data: account } = await supabase
     .from('user_accounts')
-    .select('id, first_name, last_name, email, user_role, broker_role, pos_slug, isc_username, valora_username')
+    .select('id, first_name, last_name, email, user_role, broker_role, pos_slug, isc_username, valora_username, saved_card_last4, saved_card_brand, saved_card_holder_name, saved_card_zip, saved_card_exp_month, saved_card_exp_year')
     .eq('id', authUserId)
     .maybeSingle();
 

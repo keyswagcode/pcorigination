@@ -12,7 +12,7 @@ import { generateStatementsPdf } from '../../lib/statementPdfGenerator';
 import { generateURLA1003Pdf } from '../../lib/urla1003Generator';
 import { generateURLA1003MismoXml } from '../../lib/urla1003MismoGenerator';
 import { estimateAnnualIncome } from '../../lib/incomeEstimator';
-import { startCreditPull, pollCreditPull } from '../../services/iscCreditService';
+import { startCreditPull, pollCreditPull, saveCardMetadata, forgetSavedCard } from '../../services/iscCreditService';
 import { logAudit, getAuditTrail } from '../../services/auditService';
 import type { AuditEntry } from '../../services/auditService';
 
@@ -214,6 +214,34 @@ export function BrokerBorrowerDetailPage() {
     return digits.replace(/(.{4})/g, '$1 ').trim();
   };
 
+  const detectCardBrand = (digits: string): string => {
+    if (/^4/.test(digits)) return 'Visa';
+    if (/^(5[1-5]|2[2-7])/.test(digits)) return 'MasterCard';
+    if (/^3[47]/.test(digits)) return 'AmEx';
+    if (/^(6011|65|64[4-9])/.test(digits)) return 'Discover';
+    if (/^3[0689]/.test(digits)) return 'Diners';
+    return 'Card';
+  };
+
+  const useSavedCard = () => {
+    if (!userAccount?.saved_card_last4) return;
+    setCcName(userAccount.saved_card_holder_name || '');
+    setCcExpMonth(userAccount.saved_card_exp_month || '');
+    setCcExpYear(userAccount.saved_card_exp_year || '');
+    setCcZip(userAccount.saved_card_zip || '');
+    setCcNumber('');
+    setCcCvc('');
+  };
+
+  const handleForgetCard = async () => {
+    try {
+      await forgetSavedCard();
+      window.location.reload(); // simplest way to refresh userAccount
+    } catch (err) {
+      console.error('Failed to forget card:', err);
+    }
+  };
+
   const closeCreditCardModal = () => {
     setShowCreditCardModal(false);
     setCcNumber('');
@@ -264,6 +292,17 @@ export function BrokerBorrowerDetailPage() {
               transunion: status.transunion ?? null,
               mid_score: status.mid_score ?? null,
             });
+            // Persist non-sensitive card metadata so the next pull can pre-fill.
+            // Only PAN's last 4 + brand + cardholder name + exp + zip — never the full PAN or CVC.
+            const last4 = digits.slice(-4);
+            saveCardMetadata({
+              last4,
+              brand: detectCardBrand(digits),
+              holderName: ccName || undefined,
+              zip: ccZip || undefined,
+              expMonth: ccExpMonth || undefined,
+              expYear: ccExpYear || undefined,
+            }).catch(err => console.warn('Saved-card metadata write failed (non-fatal):', err));
             setPullingCredit(false);
             setPullStatusMessage(null);
             setPullRunId(null);
@@ -1897,13 +1936,44 @@ export function BrokerBorrowerDetailPage() {
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Pull Credit for {borrower.borrower_name}</h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  ISC bills your card directly. We pass the card to ISC once and never store it.
+                  ISC bills your card directly. We never store the full card number or CVC — only the last 4 digits, brand, expiration, name, and ZIP for autofill.
                 </p>
               </div>
               <button onClick={closeCreditCardModal} disabled={pullingCredit} className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50">
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {/* Saved card prompt — appears after the user's first successful pull */}
+            {userAccount?.saved_card_last4 && (
+              <div className="px-3 py-2 bg-purple-50 border border-purple-100 rounded-lg flex items-center justify-between gap-2">
+                <div className="text-sm text-purple-900">
+                  <span className="font-medium">{userAccount.saved_card_brand || 'Card'} •••• {userAccount.saved_card_last4}</span>
+                  {userAccount.saved_card_holder_name && (
+                    <span className="text-xs text-purple-700 block">{userAccount.saved_card_holder_name}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={useSavedCard}
+                    disabled={pullingCredit}
+                    className="px-2.5 py-1 text-xs font-medium text-white bg-purple-600 rounded hover:bg-purple-700 disabled:opacity-50"
+                  >
+                    Use
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleForgetCard}
+                    disabled={pullingCredit}
+                    className="p-1 text-purple-400 hover:text-purple-600 disabled:opacity-50"
+                    title="Forget saved card"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {pullStatusMessage && (
               <div className="px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg text-sm text-amber-800 space-y-1">
@@ -1925,11 +1995,22 @@ export function BrokerBorrowerDetailPage() {
               </div>
             )}
 
-            <div className="space-y-3">
+            {/* Real <form> + name attributes so browser/1Password autofill recognizes
+                the card fields. Without these the autofill suggestion sometimes
+                offers a saved card but the click does nothing because the browser
+                can't find a matching form. onSubmit just hands off to the regular
+                handler so the existing button-driven flow still works. */}
+            <form
+              autoComplete="on"
+              onSubmit={e => { e.preventDefault(); if (!pullingCredit) handlePullCredit(); }}
+              className="space-y-3"
+            >
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Cardholder Name</label>
+                <label htmlFor="ccname" className="block text-xs font-medium text-gray-700 mb-1">Cardholder Name</label>
                 <input
+                  id="ccname"
                   type="text"
+                  name="ccname"
                   value={ccName}
                   onChange={e => setCcName(e.target.value)}
                   disabled={pullingCredit}
@@ -1939,9 +2020,11 @@ export function BrokerBorrowerDetailPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Card Number *</label>
+                <label htmlFor="cardnumber" className="block text-xs font-medium text-gray-700 mb-1">Card Number *</label>
                 <input
+                  id="cardnumber"
                   type="text"
+                  name="cardnumber"
                   inputMode="numeric"
                   value={ccNumber}
                   onChange={e => setCcNumber(formatCardNumber(e.target.value))}
@@ -1954,9 +2037,11 @@ export function BrokerBorrowerDetailPage() {
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">MM *</label>
+                  <label htmlFor="ccmonth" className="block text-xs font-medium text-gray-700 mb-1">MM *</label>
                   <input
+                    id="ccmonth"
                     type="text"
+                    name="ccmonth"
                     inputMode="numeric"
                     value={ccExpMonth}
                     onChange={e => setCcExpMonth(e.target.value.replace(/\D/g, '').slice(0, 2))}
@@ -1968,9 +2053,11 @@ export function BrokerBorrowerDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">YY *</label>
+                  <label htmlFor="ccyear" className="block text-xs font-medium text-gray-700 mb-1">YY *</label>
                   <input
+                    id="ccyear"
                     type="text"
+                    name="ccyear"
                     inputMode="numeric"
                     value={ccExpYear}
                     onChange={e => setCcExpYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -1982,9 +2069,11 @@ export function BrokerBorrowerDetailPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">CVC *</label>
+                  <label htmlFor="cvc" className="block text-xs font-medium text-gray-700 mb-1">CVC *</label>
                   <input
+                    id="cvc"
                     type="text"
+                    name="cvc"
                     inputMode="numeric"
                     value={ccCvc}
                     onChange={e => setCcCvc(e.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -1997,9 +2086,11 @@ export function BrokerBorrowerDetailPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Billing ZIP *</label>
+                <label htmlFor="ccpostal" className="block text-xs font-medium text-gray-700 mb-1">Billing ZIP *</label>
                 <input
+                  id="ccpostal"
                   type="text"
+                  name="postal-code"
                   inputMode="numeric"
                   value={ccZip}
                   onChange={e => setCcZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
@@ -2010,29 +2101,30 @@ export function BrokerBorrowerDetailPage() {
                   required
                 />
               </div>
-            </div>
 
-            {creditPullError && (
-              <div className="px-3 py-2 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">{creditPullError}</div>
-            )}
+              {creditPullError && (
+                <div className="px-3 py-2 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">{creditPullError}</div>
+              )}
 
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                onClick={closeCreditCardModal}
-                disabled={pullingCredit}
-                className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handlePullCredit}
-                disabled={pullingCredit || !ccNumber || !ccExpMonth || !ccExpYear || !ccCvc || !ccZip}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50"
-              >
-                {pullingCredit ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {pullingCredit ? 'Pulling…' : 'Pull Credit & Charge Card'}
-              </button>
-            </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeCreditCardModal}
+                  disabled={pullingCredit}
+                  className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={pullingCredit || !ccNumber || !ccExpMonth || !ccExpYear || !ccCvc || !ccZip}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {pullingCredit ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {pullingCredit ? 'Pulling…' : 'Pull Credit & Charge Card'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

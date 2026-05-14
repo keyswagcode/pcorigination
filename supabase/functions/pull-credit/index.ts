@@ -98,6 +98,47 @@ serve(async (req) => {
       return jsonRes({ ok: true })
     }
 
+    // ----- save_card_metadata: persist last4 + non-sensitive bits after a successful pull
+    // We never store the full PAN or CVC.
+    if (action === 'save_card_metadata') {
+      const { last4, brand, holderName, zip, expMonth, expYear } = body
+      if (!last4 || String(last4).replace(/\D/g, '').length !== 4) {
+        return jsonRes({ error: 'last4 must be exactly 4 digits' }, 400)
+      }
+      const { error } = await serviceClient
+        .from('user_accounts')
+        .update({
+          saved_card_last4: String(last4).replace(/\D/g, ''),
+          saved_card_brand: brand || null,
+          saved_card_holder_name: holderName || null,
+          saved_card_zip: zip ? String(zip).replace(/\D/g, '').slice(0, 5) : null,
+          saved_card_exp_month: expMonth ? String(expMonth).replace(/\D/g, '').padStart(2, '0').slice(-2) : null,
+          saved_card_exp_year: expYear ? String(expYear).replace(/\D/g, '') : null,
+          saved_card_updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id)
+      if (error) throw error
+      return jsonRes({ ok: true })
+    }
+
+    // ----- forget_card: clear saved card metadata -----
+    if (action === 'forget_card') {
+      const { error } = await serviceClient
+        .from('user_accounts')
+        .update({
+          saved_card_last4: null,
+          saved_card_brand: null,
+          saved_card_holder_name: null,
+          saved_card_zip: null,
+          saved_card_exp_month: null,
+          saved_card_exp_year: null,
+          saved_card_updated_at: null,
+        })
+        .eq('id', user.id)
+      if (error) throw error
+      return jsonRes({ ok: true })
+    }
+
     // ----- clear_credentials -----
     if (action === 'clear_credentials') {
       const { error } = await serviceClient
