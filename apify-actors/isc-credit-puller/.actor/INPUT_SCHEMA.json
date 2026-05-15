@@ -42,6 +42,13 @@
       "type": "object",
       "editor": "json",
       "isSecret": true
+    },
+    "proxy": {
+      "title": "Outbound HTTP proxy (optional)",
+      "description": "If set, all Chromium traffic routes through this proxy. Used to give every run the same egress IP so MeridianLink can whitelist it and skip MFA. Fields: server (http://host:port), username, password.",
+      "type": "object",
+      "editor": "json",
+      "isSecret": true
     }
   },
   "required": ["iscUsername", "iscPassword", "borrower", "card"]

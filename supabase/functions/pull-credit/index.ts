@@ -9,6 +9,14 @@ const corsHeaders = {
 const APIFY_TOKEN = Deno.env.get('APIFY_TOKEN') || ''
 const APIFY_ACTOR_ID = Deno.env.get('APIFY_ACTOR_ID') || ''
 
+// Optional outbound proxy for the Apify Actor — set these so every credit
+// pull egresses from the same static IP and ISC can whitelist it (skipping
+// MFA). When unset, the actor runs without a proxy and MFA is required.
+const ISC_PROXY_HOST = Deno.env.get('ISC_PROXY_HOST') || ''
+const ISC_PROXY_PORT = Deno.env.get('ISC_PROXY_PORT') || ''
+const ISC_PROXY_USER = Deno.env.get('ISC_PROXY_USER') || ''
+const ISC_PROXY_PASS = Deno.env.get('ISC_PROXY_PASS') || ''
+
 // ---------- Apify helpers ----------
 
 async function apifyFetch(path: string, init: RequestInit = {}) {
@@ -189,10 +197,19 @@ serve(async (req) => {
       const [firstName, ...rest] = (borrower.borrower_name || '').split(/\s+/)
       const lastName = rest.join(' ') || ''
 
+      const proxyConfig = ISC_PROXY_HOST && ISC_PROXY_PORT
+        ? {
+            server: `http://${ISC_PROXY_HOST}:${ISC_PROXY_PORT}`,
+            username: ISC_PROXY_USER || undefined,
+            password: ISC_PROXY_PASS || undefined,
+          }
+        : undefined
+
       const run = await startActorRun({
         iscUsername: brokerRow.isc_username,
         iscPassword: brokerRow.isc_password_encrypted,
         sessionState: brokerRow.isc_session_state || undefined,
+        proxy: proxyConfig,
         borrower: {
           firstName,
           lastName,

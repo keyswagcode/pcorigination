@@ -50,8 +50,19 @@ async function runPullCredit(input) {
   const mfaTimeoutMs = (input.mfaTimeoutSec || 300) * 1000;
   const sessionState = input.sessionState || null;
 
+  // Optional outbound proxy. When set, all Chromium traffic routes through
+  // it — used to give every credit pull the same egress IP so MeridianLink
+  // can whitelist it and skip MFA.
+  const proxy = input.proxy && input.proxy.server ? {
+    server: input.proxy.server,
+    username: input.proxy.username || undefined,
+    password: input.proxy.password || undefined,
+  } : undefined;
+  if (proxy) log.info(`Routing through proxy ${proxy.server}`);
+
   const browser = await chromium.launch({
     headless: false,
+    proxy,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
   });
   const context = await browser.newContext({
