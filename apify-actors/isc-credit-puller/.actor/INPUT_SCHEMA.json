@@ -4,32 +4,44 @@
   "type": "object",
   "schemaVersion": 1,
   "properties": {
-    "iscUsername": { "title": "ISC username", "type": "string", "editor": "textfield" },
-    "iscPassword": { "title": "ISC password", "type": "string", "editor": "textfield", "isSecret": true },
+    "iscUsername": {
+      "title": "ISC username",
+      "description": "The broker's iscsite.meridianlink.com login username.",
+      "type": "string",
+      "editor": "textfield"
+    },
+    "iscPassword": {
+      "title": "ISC password",
+      "description": "The broker's iscsite.meridianlink.com password. Used once per run, never logged.",
+      "type": "string",
+      "editor": "textfield",
+      "isSecret": true
+    },
     "loginUrl": {
       "title": "Login URL",
+      "description": "ISC login page URL. Override only for testing against a non-production endpoint.",
       "type": "string",
       "default": "https://iscsite.meridianlink.com/custom/login.aspx",
       "editor": "textfield"
     },
     "mfaTimeoutSec": {
       "title": "MFA wait timeout (seconds)",
-      "description": "How long to give the broker to enter the SMS code via Live View before failing the run",
+      "description": "How long to give the broker to enter the SMS code via Live View before failing the run.",
       "type": "integer",
       "default": 300
     },
     "borrower": {
       "title": "Borrower",
+      "description": "Borrower data filled into ISC's order form. Required fields: firstName, lastName, ssn, dob (YYYY-MM-DD). Optional: phone, email, addressStreet, addressCity, addressState, addressZip.",
       "type": "object",
-      "editor": "json",
-      "description": "Fields: firstName, lastName, ssn, dob (YYYY-MM-DD), phone, email, addressStreet, addressCity, addressState, addressZip"
+      "editor": "json"
     },
     "card": {
       "title": "Credit card (passed through to ISC's payment screen)",
+      "description": "Required fields: number, expMonth, expYear, cvc, zip. Optional: name. Used once and discarded; the actor never persists card data.",
       "type": "object",
       "editor": "json",
-      "isSecret": true,
-      "description": "Fields: number, expMonth, expYear, cvc, zip, name (optional). Never stored anywhere — used once and discarded."
+      "isSecret": true
     }
   },
   "required": ["iscUsername", "iscPassword", "borrower", "card"]
