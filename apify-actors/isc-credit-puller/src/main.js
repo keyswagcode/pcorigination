@@ -85,19 +85,27 @@ async function runPullCredit(input) {
       await fail('login_submit', err);
     }
 
-    // 2. Wait for post-login. If MFA is challenged, broker clears it via Live View.
-    log.info(`Waiting for post-login navigation (timeout ${mfaTimeoutMs / 1000}s — broker can use Live View if MFA is required)`);
+    // 2. Wait for post-login. ISC's flow goes:
+    //   /custom/login.aspx        → username + password
+    //   /shared/Login/EnterAuthCode.aspx (and variants) → SMS MFA code
+    //   /custom/...               → actual app
+    // Broker uses Apify Live View to enter the SMS code while we poll.
+    // We're "past login" only when the URL is on neither the login page
+    // NOR any auth-code/MFA interstitial.
+    const STILL_AUTHENTICATING = /login\.aspx|enterauthcode|entercode|mfa|twofactor|2fa|verify|otp|challenge/i;
+
+    log.info(`Waiting for post-login navigation (timeout ${mfaTimeoutMs / 1000}s — broker should use Live View to enter the SMS code)`);
     const start = Date.now();
     while (Date.now() - start < mfaTimeoutMs) {
       const url = page.url();
-      if (url && !/login\.aspx/i.test(url)) {
+      if (url && !STILL_AUTHENTICATING.test(url)) {
         await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-        if (!/login\.aspx/i.test(page.url())) break;
+        if (!STILL_AUTHENTICATING.test(page.url())) break;
       }
       await page.waitForTimeout(2000);
     }
-    if (/login\.aspx/i.test(page.url())) {
-      throw new Error(`Login or MFA not completed within ${mfaTimeoutMs / 1000}s`);
+    if (STILL_AUTHENTICATING.test(page.url())) {
+      throw new Error(`Login or MFA not completed within ${mfaTimeoutMs / 1000}s. Last URL: ${page.url()}`);
     }
     log.info(`Past login: ${page.url()}`);
 
