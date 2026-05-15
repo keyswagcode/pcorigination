@@ -219,6 +219,28 @@ serve(async (req) => {
       return jsonRes({ ok: true, runId: run.id, liveViewUrl })
     }
 
+    // ----- submit_mfa_code: write the SMS code into the running actor's KV store -----
+    if (action === 'submit_mfa_code') {
+      const { runId, code } = body
+      if (!runId || !code) return jsonRes({ error: 'Missing runId or code' }, 400)
+      const cleanCode = String(code).replace(/\D/g, '')
+      if (cleanCode.length < 4 || cleanCode.length > 10) {
+        return jsonRes({ error: 'Code must be 4-10 digits' }, 400)
+      }
+      const run = await getRun(runId)
+      // PUT the code into the actor's default key-value store; the actor's
+      // poll loop picks it up within 2 seconds.
+      const putRes = await fetch(
+        `https://api.apify.com/v2/key-value-stores/${run.defaultKeyValueStoreId}/records/mfa_code.txt?token=${APIFY_TOKEN}`,
+        { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: cleanCode }
+      )
+      if (!putRes.ok) {
+        const text = await putRes.text().catch(() => '')
+        throw new Error(`Failed to write MFA code: ${putRes.status} ${text.slice(0, 200)}`)
+      }
+      return jsonRes({ ok: true })
+    }
+
     // ----- pull_status: called by frontend on a poll loop -----
     if (action === 'pull_status') {
       const { runId, borrower_id } = body
@@ -226,7 +248,14 @@ serve(async (req) => {
 
       const run = await getRun(runId)
       if (run.status === 'READY' || run.status === 'RUNNING') {
-        return jsonRes({ ok: true, status: 'pending', liveViewUrl: run.containerUrl || null })
+        // Check if the actor is waiting on an SMS code from us
+        let mfaRequired = false
+        try {
+          const mfaRes = await getKvRecord(run.defaultKeyValueStoreId, 'mfa_status.json')
+          const mfaStatus = await mfaRes.json() as { state?: string }
+          mfaRequired = mfaStatus?.state === 'awaiting_code'
+        } catch { /* mfa_status.json not present yet */ }
+        return jsonRes({ ok: true, status: 'pending', liveViewUrl: run.containerUrl || null, mfaRequired })
       }
       if (run.status !== 'SUCCEEDED') {
         // Fetch error details from OUTPUT if present

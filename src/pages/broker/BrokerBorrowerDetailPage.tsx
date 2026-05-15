@@ -12,7 +12,7 @@ import { generateStatementsPdf } from '../../lib/statementPdfGenerator';
 import { generateURLA1003Pdf } from '../../lib/urla1003Generator';
 import { generateURLA1003MismoXml } from '../../lib/urla1003MismoGenerator';
 import { estimateAnnualIncome } from '../../lib/incomeEstimator';
-import { startCreditPull, pollCreditPull, saveCardMetadata, forgetSavedCard } from '../../services/iscCreditService';
+import { startCreditPull, pollCreditPull, saveCardMetadata, forgetSavedCard, submitMfaCode } from '../../services/iscCreditService';
 import { logAudit, getAuditTrail } from '../../services/auditService';
 import type { AuditEntry } from '../../services/auditService';
 
@@ -206,8 +206,11 @@ export function BrokerBorrowerDetailPage() {
   const [ccZip, setCcZip] = useState('');
   const [ccName, setCcName] = useState('');
   const [pullRunId, setPullRunId] = useState<string | null>(null);
-  const [pullLiveViewUrl, setPullLiveViewUrl] = useState<string | null>(null);
+  const [, setPullLiveViewUrl] = useState<string | null>(null);
   const [pullStatusMessage, setPullStatusMessage] = useState<string | null>(null);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [submittingMfa, setSubmittingMfa] = useState(false);
 
   const formatCardNumber = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 19);
@@ -253,6 +256,24 @@ export function BrokerBorrowerDetailPage() {
     setPullRunId(null);
     setPullLiveViewUrl(null);
     setPullStatusMessage(null);
+    setMfaRequired(false);
+    setMfaCode('');
+    setSubmittingMfa(false);
+  };
+
+  const handleSubmitMfa = async () => {
+    if (!pullRunId || mfaCode.replace(/\D/g, '').length < 4) return;
+    setSubmittingMfa(true);
+    try {
+      await submitMfaCode(pullRunId, mfaCode);
+      setMfaRequired(false);
+      setMfaCode('');
+      setPullStatusMessage('SMS code submitted — finishing login and moving on…');
+    } catch (err) {
+      setCreditPullError(err instanceof Error ? err.message : 'Failed to submit code');
+    } finally {
+      setSubmittingMfa(false);
+    }
   };
 
   const handlePullCredit = async () => {
@@ -285,6 +306,13 @@ export function BrokerBorrowerDetailPage() {
         try {
           const status = await pollCreditPull(start.runId, borrower.id);
           if (status.liveViewUrl) setPullLiveViewUrl(status.liveViewUrl);
+          if (status.mfaRequired) {
+            setMfaRequired(true);
+            setPullStatusMessage('ISC sent an SMS code to your phone. Type it below to continue.');
+          } else if (mfaRequired) {
+            // Actor moved past the auth-code page after we submitted the code
+            setMfaRequired(false);
+          }
           if (status.status === 'succeeded') {
             setCreditPullResult({
               equifax: status.equifax ?? null,
@@ -1975,22 +2003,40 @@ export function BrokerBorrowerDetailPage() {
               </div>
             )}
 
-            {pullStatusMessage && (
+            {/* SMS MFA code prompt — appears when ISC challenges with an auth code */}
+            {mfaRequired && (
+              <div className="px-3 py-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                <p className="text-sm font-semibold text-blue-900">
+                  ISC sent an SMS code to your phone
+                </p>
+                <p className="text-xs text-blue-700">Type the 6-digit code below. We'll forward it to ISC and continue the credit pull.</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    value={mfaCode}
+                    onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="123456"
+                    disabled={submittingMfa}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSubmitMfa(); } }}
+                    className="flex-1 px-3 py-2 border border-blue-300 rounded-lg text-lg font-mono tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSubmitMfa}
+                    disabled={submittingMfa || mfaCode.replace(/\D/g, '').length < 4}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {submittingMfa ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {pullStatusMessage && !mfaRequired && (
               <div className="px-3 py-2 bg-amber-50 border border-amber-100 rounded-lg text-sm text-amber-800 space-y-1">
                 <p className="font-medium">{pullStatusMessage}</p>
-                {pullLiveViewUrl && (
-                  <p>
-                    <a
-                      href={pullLiveViewUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline text-amber-700 font-medium"
-                    >
-                      Open ISC window in Apify console
-                    </a>{' '}
-                    <span className="text-xs text-amber-600">— sign in to Apify, click the "Live View" tab, then type the SMS code ISC just texted you.</span>
-                  </p>
-                )}
                 {pullRunId && <p className="text-[10px] text-amber-500 font-mono">run {pullRunId.slice(0, 12)}</p>}
               </div>
             )}

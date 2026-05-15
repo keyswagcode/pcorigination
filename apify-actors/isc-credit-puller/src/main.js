@@ -89,19 +89,73 @@ async function runPullCredit(input) {
     //   /custom/login.aspx        → username + password
     //   /shared/Login/EnterAuthCode.aspx (and variants) → SMS MFA code
     //   /custom/...               → actual app
-    // Broker uses Apify Live View to enter the SMS code while we poll.
-    // We're "past login" only when the URL is on neither the login page
-    // NOR any auth-code/MFA interstitial.
+    // We don't use Apify Live View — instead, when we hit the auth-code page,
+    // we publish mfa_status.json = "awaiting_code" to the run's KV store and
+    // poll for mfa_code.txt (the orchestrator/edge function writes it there
+    // after the broker types the code in our app's modal). Then we type the
+    // code into ISC ourselves and continue.
     const STILL_AUTHENTICATING = /login\.aspx|enterauthcode|entercode|mfa|twofactor|2fa|verify|otp|challenge/i;
+    const ON_AUTHCODE_PAGE = /enterauthcode|entercode|otp|verify|challenge|twofactor|2fa|mfa/i;
 
-    log.info(`Waiting for post-login navigation (timeout ${mfaTimeoutMs / 1000}s — broker should use Live View to enter the SMS code)`);
+    const ApifyMod = await import('apify');
+    const ActorRef = ApifyMod.Actor;
+
+    log.info(`Waiting for post-login navigation (timeout ${mfaTimeoutMs / 1000}s)`);
     const start = Date.now();
+    let mfaHandled = false;
+
     while (Date.now() - start < mfaTimeoutMs) {
       const url = page.url();
+
+      // Done — past login + past any auth-code interstitial
       if (url && !STILL_AUTHENTICATING.test(url)) {
         await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
         if (!STILL_AUTHENTICATING.test(page.url())) break;
       }
+
+      // Stuck on the SMS auth-code page — handle it via in-app code entry
+      if (!mfaHandled && ON_AUTHCODE_PAGE.test(url)) {
+        log.info(`On MFA auth-code page (${url}) — publishing mfa_status=awaiting_code and polling for code`);
+        await ActorRef.setValue('mfa_status.json', { state: 'awaiting_code', url, timestamp: Date.now() });
+
+        let code = null;
+        const codeStart = Date.now();
+        const CODE_WAIT_MS = mfaTimeoutMs - (Date.now() - start); // remaining budget
+        while (Date.now() - codeStart < CODE_WAIT_MS) {
+          const stored = await ActorRef.getValue('mfa_code.txt');
+          if (stored) {
+            code = String(stored).trim().replace(/\D/g, '');
+            if (code.length >= 4) break;
+          }
+          await page.waitForTimeout(2000);
+        }
+        if (!code) {
+          await ActorRef.setValue('mfa_status.json', { state: 'timeout', timestamp: Date.now() });
+          throw new Error(`SMS code not provided within ${Math.floor(CODE_WAIT_MS / 1000)}s`);
+        }
+
+        log.info(`Got SMS code (${code.length} digits) — entering into ISC`);
+        await typeMfaCode(page, code);
+
+        // Try to submit. ISC's auth-code page typically auto-submits after
+        // the last digit; if not, click any visible Submit/Continue/Verify.
+        try {
+          await page.waitForLoadState('networkidle', { timeout: 8_000 });
+        } catch { /* page might still be settling */ }
+        if (ON_AUTHCODE_PAGE.test(page.url())) {
+          const submitBtn = page.getByRole('button', { name: /^(submit|continue|verify|next|enter|ok|confirm|sign in|log in)$/i })
+            .or(page.locator('input[type="submit"]'));
+          if (await submitBtn.count() > 0) {
+            await submitBtn.first().click({ timeout: 8_000 }).catch(() => {});
+          }
+        }
+
+        await ActorRef.setValue('mfa_status.json', { state: 'submitted', timestamp: Date.now() });
+        // Clear the code so a future pull-of-the-same-store doesn't reuse it
+        await ActorRef.setValue('mfa_code.txt', null);
+        mfaHandled = true;
+      }
+
       await page.waitForTimeout(2000);
     }
     if (STILL_AUTHENTICATING.test(page.url())) {
@@ -222,6 +276,30 @@ async function runPullCredit(input) {
   } finally {
     await context.close().catch(() => {});
     await browser.close().catch(() => {});
+  }
+}
+
+// Enter the SMS code into ISC's auth-code page. The page may render either
+// a regular text input OR a numeric keypad of <button>0</button>...<button>9</button>
+// elements (we saw the latter in earlier diagnostic dumps). Try input-fill
+// first; fall back to clicking each digit's button.
+async function typeMfaCode(page, code) {
+  const digits = String(code).replace(/\D/g, '');
+  if (!digits) throw new Error('typeMfaCode called with no digits');
+
+  const codeInput = page.locator(
+    'input[type="text"]:visible, input[type="tel"]:visible, input[type="number"]:visible, input[name*="code" i]:visible, input[id*="code" i]:visible, input[aria-label*="code" i]:visible'
+  ).first();
+  if (await codeInput.count() > 0) {
+    await codeInput.fill(digits);
+    return;
+  }
+
+  // Numeric-keypad fallback — click one button per digit
+  for (const d of digits) {
+    const btn = page.locator(`button:has-text("${d}"), [role="button"]:has-text("${d}")`).first();
+    await btn.click({ timeout: 5_000 });
+    await page.waitForTimeout(120);
   }
 }
 

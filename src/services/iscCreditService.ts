@@ -51,12 +51,17 @@ export interface CreditPullStatus {
   ok: boolean;
   status: 'pending' | 'succeeded' | 'failed';
   liveViewUrl?: string | null;
+  mfaRequired?: boolean;
   error?: string;
   equifax?: number | null;
   experian?: number | null;
   transunion?: number | null;
   mid_score?: number | null;
   document_id?: string | null;
+}
+
+export async function submitMfaCode(runId: string, code: string): Promise<void> {
+  await callPullCreditFunction('submit_mfa_code', { runId, code });
 }
 
 export async function startCreditPull(borrowerId: string, card: CardPaymentInput): Promise<CreditPullStart> {
