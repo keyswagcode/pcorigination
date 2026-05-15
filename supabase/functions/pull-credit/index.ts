@@ -179,7 +179,7 @@ serve(async (req) => {
 
       const { data: brokerRow } = await serviceClient
         .from('user_accounts')
-        .select('isc_username, isc_password_encrypted')
+        .select('isc_username, isc_password_encrypted, isc_session_state')
         .eq('id', user.id)
         .maybeSingle()
       if (!brokerRow?.isc_username || !brokerRow?.isc_password_encrypted) {
@@ -192,6 +192,7 @@ serve(async (req) => {
       const run = await startActorRun({
         iscUsername: brokerRow.isc_username,
         iscPassword: brokerRow.isc_password_encrypted,
+        sessionState: brokerRow.isc_session_state || undefined,
         borrower: {
           firstName,
           lastName,
@@ -283,6 +284,22 @@ serve(async (req) => {
       if (!output.ok) {
         return jsonRes({ ok: false, status: 'failed', error: output.error || 'Actor returned ok=false' })
       }
+
+      // Persist captured session state so the next pull can skip login + MFA.
+      // Best-effort — if it's not present (e.g., older actor build), skip silently.
+      try {
+        const sessionRes = await getKvRecord(run.defaultKeyValueStoreId, 'session_state.json')
+        const session = await sessionRes.json()
+        if (session?.cookies) {
+          await serviceClient
+            .from('user_accounts')
+            .update({
+              isc_session_state: session,
+              isc_session_captured_at: new Date().toISOString(),
+            })
+            .eq('id', user.id)
+        }
+      } catch { /* session_state.json not present in this run */ }
 
       let documentId: string | null = null
       if (output.pdfKey) {

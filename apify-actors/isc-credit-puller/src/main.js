@@ -46,9 +46,10 @@ async function runPullCredit(input) {
   }
 
   const loginUrl = input.loginUrl || 'https://iscsite.meridianlink.com/custom/login.aspx';
+  const dashboardUrl = input.dashboardUrl || 'https://iscsite.meridianlink.com/';
   const mfaTimeoutMs = (input.mfaTimeoutSec || 300) * 1000;
+  const sessionState = input.sessionState || null;
 
-  // Headed so Apify Live View can stream the browser to the broker if MFA is needed.
   const browser = await chromium.launch({
     headless: false,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
@@ -57,6 +58,7 @@ async function runPullCredit(input) {
     viewport: { width: 1280, height: 800 },
     acceptDownloads: true,
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    storageState: sessionState || undefined,
   });
   const page = await context.newPage();
 
@@ -66,23 +68,47 @@ async function runPullCredit(input) {
     throw new Error(`Stage "${stage}" failed: ${err?.message || err}`);
   };
 
+  const ApifyMod = await import('apify');
+  const ActorRef = ApifyMod.Actor;
+
   try {
-    // 1. Login
-    log.info(`Opening ${loginUrl}`);
-    await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    try {
-      await fillByCommonAttr(page, ['username', 'user', 'login', 'email'], iscUsername);
-      await fillByCommonAttr(page, ['password', 'pass'], iscPassword);
-      // Click any visible Login button (or fall back to Enter)
-      const loginBtn = page.getByRole('button', { name: /^(login|sign in|log in|submit)$/i })
-        .or(page.locator('input[type="submit"]'));
-      if (await loginBtn.count() > 0) {
-        await loginBtn.first().click({ timeout: 10_000 }).catch(() => {});
-      } else {
-        await page.keyboard.press('Enter');
+    // 1. Login. If we have a saved session, try restoring it first — that
+    // skips both username/password AND MFA. Only fall back to fresh login
+    // if ISC redirects us back to the login page (session expired).
+    let loggedInViaSession = false;
+    if (sessionState) {
+      log.info(`Restoring saved session and trying to land directly on the dashboard…`);
+      try {
+        await page.goto(dashboardUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+        await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
+        const url = page.url();
+        if (!/login\.aspx|enterauthcode|entercode|mfa|twofactor|2fa|verify|otp|challenge/i.test(url)) {
+          log.info(`Session restore succeeded — landed on ${url}, skipping login + MFA`);
+          loggedInViaSession = true;
+        } else {
+          log.info(`Session restore landed on ${url} — session expired, falling back to fresh login`);
+        }
+      } catch (err) {
+        log.warning(`Session restore failed: ${err?.message || err} — falling back to fresh login`);
       }
-    } catch (err) {
-      await fail('login_submit', err);
+    }
+
+    if (!loggedInViaSession) {
+      log.info(`Opening ${loginUrl}`);
+      await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      try {
+        await fillByCommonAttr(page, ['username', 'user', 'login', 'email'], iscUsername);
+        await fillByCommonAttr(page, ['password', 'pass'], iscPassword);
+        const loginBtn = page.getByRole('button', { name: /^(login|sign in|log in|submit)$/i })
+          .or(page.locator('input[type="submit"]'));
+        if (await loginBtn.count() > 0) {
+          await loginBtn.first().click({ timeout: 10_000 }).catch(() => {});
+        } else {
+          await page.keyboard.press('Enter');
+        }
+      } catch (err) {
+        await fail('login_submit', err);
+      }
     }
 
     // 2. Wait for post-login. ISC's flow goes:
@@ -97,14 +123,11 @@ async function runPullCredit(input) {
     const STILL_AUTHENTICATING = /login\.aspx|enterauthcode|entercode|mfa|twofactor|2fa|verify|otp|challenge/i;
     const ON_AUTHCODE_PAGE = /enterauthcode|entercode|otp|verify|challenge|twofactor|2fa|mfa/i;
 
-    const ApifyMod = await import('apify');
-    const ActorRef = ApifyMod.Actor;
-
-    log.info(`Waiting for post-login navigation (timeout ${mfaTimeoutMs / 1000}s)`);
+    log.info(loggedInViaSession ? 'Skipping post-login wait (session restored)' : `Waiting for post-login navigation (timeout ${mfaTimeoutMs / 1000}s)`);
     const start = Date.now();
     let mfaHandled = false;
 
-    while (Date.now() - start < mfaTimeoutMs) {
+    while (!loggedInViaSession && Date.now() - start < mfaTimeoutMs) {
       const url = page.url();
 
       // Done — past login + past any auth-code interstitial
@@ -116,6 +139,37 @@ async function runPullCredit(input) {
       // Stuck on the SMS auth-code page — handle it via in-app code entry
       if (!mfaHandled && ON_AUTHCODE_PAGE.test(url)) {
         log.info(`On MFA auth-code page (${url}) — publishing mfa_status=awaiting_code and polling for code`);
+
+        // Comprehensive snapshot of the auth-code page so we can diagnose
+        // delivery issues (no SMS arriving, alternate delivery methods, etc.).
+        // The previous narrow link/button dump missed inputs and dropdowns.
+        try {
+          const html = await page.content();
+          const allInteractive = await page.$$eval(
+            'a, button, input, select, textarea, [role="button"], [role="menuitem"], [role="link"], [role="radio"], [role="checkbox"]',
+            els => els.map(e => ({
+              tag: e.tagName.toLowerCase(),
+              type: e.getAttribute('type') || '',
+              text: (e.textContent || '').trim().slice(0, 200),
+              value: ('value' in e ? String(e.value || '') : '').slice(0, 100),
+              name: e.getAttribute('name') || '',
+              id: e.id || '',
+              href: e.getAttribute('href') || '',
+              ariaLabel: e.getAttribute('aria-label') || '',
+              placeholder: e.getAttribute('placeholder') || '',
+              role: e.getAttribute('role') || '',
+              visible: !(e.offsetParent === null),
+            })).slice(0, 500)
+          );
+          await ActorRef.setValue('authcode_url.txt', url, { contentType: 'text/plain' });
+          await ActorRef.setValue('authcode_elements.json', allInteractive);
+          await ActorRef.setValue('authcode_page.html', html, { contentType: 'text/html' });
+          await page.screenshot({ fullPage: true }).then(s => ActorRef.setValue('authcode_screenshot.png', s, { contentType: 'image/png' })).catch(() => {});
+          log.info(`Saved auth-code snapshot: ${allInteractive.length} interactive elements, ${html.length} bytes of HTML`);
+        } catch (snapErr) {
+          log.warning(`Failed to capture auth-code snapshot: ${snapErr?.message || snapErr}`);
+        }
+
         await ActorRef.setValue('mfa_status.json', { state: 'awaiting_code', url, timestamp: Date.now() });
 
         let code = null;
@@ -163,11 +217,21 @@ async function runPullCredit(input) {
     }
     log.info(`Past login: ${page.url()}`);
 
+    // Capture session state so the next pull can skip login + MFA entirely.
+    // The orchestrator (edge function) reads session_state.json from the
+    // run's KV store and persists it to user_accounts.isc_session_state.
+    try {
+      const captured = await context.storageState();
+      await ActorRef.setValue('session_state.json', captured);
+      log.info(`Captured session state: ${captured.cookies?.length || 0} cookies, ${captured.origins?.length || 0} origins`);
+    } catch (capErr) {
+      log.warning(`Failed to capture session state: ${capErr?.message || capErr}`);
+    }
+
     // Snapshot the post-login page so we can iterate on selectors without a
     // round-trip to retrieve a screenshot. Always written, regardless of
     // whether the next stage succeeds.
     try {
-      const { Actor } = await import('apify');
       const html = await page.content();
       const linkDump = await page.$$eval('a, button, [role="menuitem"], [role="link"]', els =>
         els.map(e => ({
@@ -178,9 +242,9 @@ async function runPullCredit(input) {
           name: e.getAttribute('name') || '',
         })).filter(x => x.text).slice(0, 500)
       );
-      await Actor.setValue('post_login_url.txt', page.url(), { contentType: 'text/plain' });
-      await Actor.setValue('post_login_links.json', linkDump);
-      await Actor.setValue('post_login.html', html, { contentType: 'text/html' });
+      await ActorRef.setValue('post_login_url.txt', page.url(), { contentType: 'text/plain' });
+      await ActorRef.setValue('post_login_links.json', linkDump);
+      await ActorRef.setValue('post_login.html', html, { contentType: 'text/html' });
       log.info(`Saved post-login snapshot: url, ${linkDump.length} links, ${html.length} bytes of HTML`);
     } catch (snapErr) {
       log.warning(`Failed to write post-login snapshot: ${snapErr?.message || snapErr}`);
