@@ -101,12 +101,36 @@ async function runPullCredit(input) {
     }
     log.info(`Past login: ${page.url()}`);
 
-    // 3. Navigate to order form
-    log.info('Navigating Credit Verification → Order Credit Report');
+    // Snapshot the post-login page so we can iterate on selectors without a
+    // round-trip to retrieve a screenshot. Always written, regardless of
+    // whether the next stage succeeds.
     try {
-      await clickByText(page, /credit verification/i);
+      const { Actor } = await import('apify');
+      const html = await page.content();
+      const linkDump = await page.$$eval('a, button, [role="menuitem"], [role="link"]', els =>
+        els.map(e => ({
+          tag: e.tagName.toLowerCase(),
+          text: (e.textContent || '').trim().slice(0, 200),
+          href: e.getAttribute('href') || '',
+          id: e.id || '',
+          name: e.getAttribute('name') || '',
+        })).filter(x => x.text).slice(0, 500)
+      );
+      await Actor.setValue('post_login_url.txt', page.url(), { contentType: 'text/plain' });
+      await Actor.setValue('post_login_links.json', linkDump);
+      await Actor.setValue('post_login.html', html, { contentType: 'text/html' });
+      log.info(`Saved post-login snapshot: url, ${linkDump.length} links, ${html.length} bytes of HTML`);
+    } catch (snapErr) {
+      log.warning(`Failed to write post-login snapshot: ${snapErr?.message || snapErr}`);
+    }
+
+    // 3. Navigate to order form. Try a wide net of common Meridian Link
+    // navigation labels — different iscsite deployments customize these.
+    log.info('Navigating to order credit report');
+    try {
+      await clickByText(page, /credit verification|verifications?|services|credit reports?|order (services|credit|new)|new order|credit/i);
       await page.waitForLoadState('domcontentloaded', { timeout: 30_000 });
-      await clickByText(page, /order credit report/i);
+      await clickByText(page, /order credit report|new credit (report|order)|order credit|new order|order/i);
       await page.waitForLoadState('domcontentloaded', { timeout: 30_000 });
     } catch (err) {
       await fail('navigate_to_order_form', err);
