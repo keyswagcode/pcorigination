@@ -1986,9 +1986,9 @@ export function BrokerBorrowerDetailPage() {
                       rel="noopener noreferrer"
                       className="underline text-amber-700 font-medium"
                     >
-                      Open ISC window
+                      Open ISC window in Apify console
                     </a>{' '}
-                    <span className="text-xs text-amber-600">— use this if ISC sends an SMS code to enter.</span>
+                    <span className="text-xs text-amber-600">— sign in to Apify, click the "Live View" tab, then type the SMS code ISC just texted you.</span>
                   </p>
                 )}
                 {pullRunId && <p className="text-[10px] text-amber-500 font-mono">run {pullRunId.slice(0, 12)}</p>}

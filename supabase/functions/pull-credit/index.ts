@@ -53,17 +53,24 @@ async function getKvRecord(storeId: string, key: string): Promise<Response> {
   return await apifyFetch(`/key-value-stores/${storeId}/records/${encodeURIComponent(key)}`)
 }
 
-// Apify exposes `containerUrl` (the live view) once the container starts.
-async function waitForLiveView(runId: string, timeoutMs = 60_000): Promise<{ run: ApifyRun; liveViewUrl: string | null }> {
+// Apify only populates `containerUrl` for actors that use Standby mode or
+// explicitly expose an HTTP port. For headed-browser actors we fall back to
+// the Apify console URL — the broker has to be logged into apify.com in the
+// same browser, then the console's "Live View" tab streams the running
+// container so they can type the SMS code.
+async function waitForLiveView(runId: string, timeoutMs = 10_000): Promise<{ run: ApifyRun; liveViewUrl: string | null }> {
   const start = Date.now()
   let run = await getRun(runId)
   while (Date.now() - start < timeoutMs) {
     if (run.containerUrl) return { run, liveViewUrl: run.containerUrl }
     if (['FAILED', 'TIMED-OUT', 'ABORTED'].includes(run.status)) return { run, liveViewUrl: null }
-    await new Promise((r) => setTimeout(r, 2000))
+    await new Promise((r) => setTimeout(r, 1500))
     run = await getRun(runId)
   }
-  return { run, liveViewUrl: null }
+  // Fall back to the console URL: console.apify.com/actors/<id>/runs/<runId>
+  // The console UI has a "Live View" tab that streams the headed browser via VNC.
+  const consoleUrl = `https://console.apify.com/actors/${encodeURIComponent(APIFY_ACTOR_ID)}/runs/${runId}`
+  return { run, liveViewUrl: consoleUrl }
 }
 
 // ---------- request handler ----------
