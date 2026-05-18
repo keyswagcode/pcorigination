@@ -938,32 +938,30 @@ export function BrokerBorrowerDetailPage() {
               <Phone className="w-4 h-4" /> Text
             </a>
           )}
-          {plaidReport && (
-            <div className="relative">
-              <button
-                onClick={() => setStatementMenuOpen(statementMenuOpen === 'header' ? null : 'header')}
-                disabled={generatingStatements}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
-                title="Download bank statements from verified Plaid data"
-              >
-                {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                Bank Statements
-              </button>
-              {statementMenuOpen === 'header' && (
-                <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
-                  {[1, 2, 12].map(m => (
-                    <button
-                      key={m}
-                      onClick={() => handleDownloadStatements(m)}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 hover:text-teal-700"
-                    >
-                      Last {m} {m === 1 ? 'month' : 'months'}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <div className="relative">
+            <button
+              onClick={() => plaidReport && setStatementMenuOpen(statementMenuOpen === 'header' ? null : 'header')}
+              disabled={!plaidReport || generatingStatements}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={plaidReport ? 'Download bank statements from verified Plaid data' : 'Borrower has not connected Plaid yet — ask them to link their bank from the borrower portal'}
+            >
+              {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Bank Statements
+            </button>
+            {plaidReport && statementMenuOpen === 'header' && (
+              <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+                {[1, 2, 12].map(m => (
+                  <button
+                    key={m}
+                    onClick={() => handleDownloadStatements(m)}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 hover:text-teal-700"
+                  >
+                    Last {m} {m === 1 ? 'month' : 'months'}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex flex-col gap-1.5">
             <button
               onClick={() => {
@@ -1354,32 +1352,30 @@ export function BrokerBorrowerDetailPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Documents</h2>
             <div className="flex items-center gap-2">
-              {plaidReport && (
-                <div className="relative">
-                  <button
-                    onClick={() => setStatementMenuOpen(statementMenuOpen === 'docs' ? null : 'docs')}
-                    disabled={generatingStatements}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50"
-                    title="Download bank statements (Plaid verified)"
-                  >
-                    {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    Download Bank Statements
-                  </button>
-                  {statementMenuOpen === 'docs' && (
-                    <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
-                      {[1, 2, 12].map(m => (
-                        <button
-                          key={m}
-                          onClick={() => handleDownloadStatements(m)}
-                          className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 hover:text-teal-700"
-                        >
-                          Last {m} {m === 1 ? 'month' : 'months'}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+              <div className="relative">
+                <button
+                  onClick={() => plaidReport && setStatementMenuOpen(statementMenuOpen === 'docs' ? null : 'docs')}
+                  disabled={!plaidReport || generatingStatements}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={plaidReport ? 'Download bank statements (Plaid verified)' : 'Borrower has not connected Plaid yet — ask them to link their bank from the borrower portal'}
+                >
+                  {generatingStatements ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  Download Bank Statements
+                </button>
+                {plaidReport && statementMenuOpen === 'docs' && (
+                  <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+                    {[1, 2, 12].map(m => (
+                      <button
+                        key={m}
+                        onClick={() => handleDownloadStatements(m)}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-teal-50 hover:text-teal-700"
+                      >
+                        Last {m} {m === 1 ? 'month' : 'months'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {borrower.email && (
                 <button
                   type="button"
