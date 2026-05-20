@@ -77,11 +77,18 @@ function isIncomeTransaction(tx: Transaction): boolean {
 export function estimateAnnualIncome(report: PlaidReport | null | undefined): IncomeEstimate | null {
   if (!report?.items) return null;
 
-  const now = new Date();
-  const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+  // Use every income transaction Plaid gives us — Plaid CRA base reports
+  // typically include 24 months of history, so capping at 12 throws away
+  // half the signal. We use the actual span from the earliest to the
+  // latest income transaction as the denominator, then extrapolate to
+  // a yearly figure (monthlyAverage * 12) regardless of whether we
+  // happened to land at exactly 12 months. This is what the underwriter
+  // would do by hand: "they made $X over Y months, so monthly avg is
+  // X/Y, annual is X/Y * 12."
 
   let total = 0;
   let earliest: Date | null = null;
+  let latest: Date | null = null;
   let count = 0;
 
   for (const item of report.items) {
@@ -91,27 +98,29 @@ export function estimateAnnualIncome(report: PlaidReport | null | undefined): In
         if (!tx.date) continue;
         const d = new Date(tx.date);
         if (isNaN(d.getTime())) continue;
-        if (d < cutoff) continue;
         if (!isIncomeTransaction(tx)) continue;
         total += Math.abs(Number(tx.amount) || 0);
         count += 1;
         if (!earliest || d < earliest) earliest = d;
+        if (!latest || d > latest) latest = d;
       }
     }
   }
 
-  if (count === 0) return { annualIncome: 0, monthlyAverage: 0, monthsCovered: 0, itemCount: 0 };
+  if (count === 0 || !earliest || !latest) {
+    return { annualIncome: 0, monthlyAverage: 0, monthsCovered: 0, itemCount: 0 };
+  }
 
-  // Months covered = how many months of data we actually have to support the figure
-  const start = earliest ?? cutoff;
+  // Months covered = span between the first and last detected income tx.
+  // Floored at 1 month so a single paycheck doesn't divide by ~0.
+  const spanMs = latest.getTime() - earliest.getTime();
   const monthsCovered = Math.max(
     1,
-    Math.round(((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 30.44)) * 10) / 10
+    Math.round((spanMs / (1000 * 60 * 60 * 24 * 30.44)) * 10) / 10
   );
 
-  // If we have less than 12 months of data, annualize from the average.
   const monthlyAverage = total / monthsCovered;
-  const annualIncome = monthsCovered >= 12 ? total : monthlyAverage * 12;
+  const annualIncome = monthlyAverage * 12;
 
   return {
     annualIncome: Math.round(annualIncome),
