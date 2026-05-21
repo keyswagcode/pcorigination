@@ -84,6 +84,13 @@ export function AdminServicedLoanDetailPage() {
   const handlePayoffStatement = async () => {
     if (!loan) return;
     const orgName = organization?.name || 'Key Real Estate Capital';
+    // Fetch fresh servicing-remit fields off the org so this picks up
+    // whatever admin saved in Settings → Servicing without needing a reload.
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('name, servicing_remit_to_name, servicing_remit_to_address, servicing_wire_instructions')
+      .eq('id', loan.organization_id)
+      .maybeSingle();
     const today = new Date().toISOString().slice(0, 10);
     const good = new Date(); good.setDate(good.getDate() + 30);
     await generatePayoffStatementPdf({
@@ -99,8 +106,9 @@ export function AdminServicedLoanDetailPage() {
       escrowBalance: loan.escrow_balance,
       unpaidLateFees: 0,
       recordingFee: 35,
-      remitToName: orgName,
-      remitToAddress: 'San Diego, CA 92101',
+      remitToName: org?.servicing_remit_to_name || orgName,
+      remitToAddress: org?.servicing_remit_to_address || 'Please set in Settings → Servicing',
+      remitToWireInstructions: org?.servicing_wire_instructions || undefined,
     });
   };
 

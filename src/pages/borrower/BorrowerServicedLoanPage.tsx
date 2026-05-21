@@ -54,6 +54,12 @@ export function BorrowerServicedLoanPage() {
   const perDiem = perDiemInterest(loan.current_principal, loan.interest_rate);
 
   const handlePayoff = async () => {
+    if (!loan) return;
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('name, servicing_remit_to_name, servicing_remit_to_address, servicing_wire_instructions')
+      .eq('id', loan.organization_id)
+      .maybeSingle();
     const today = new Date().toISOString().slice(0, 10);
     const good = new Date(); good.setDate(good.getDate() + 30);
     await generatePayoffStatementPdf({
@@ -69,8 +75,9 @@ export function BorrowerServicedLoanPage() {
       escrowBalance: loan.escrow_balance,
       unpaidLateFees: 0,
       recordingFee: 35,
-      remitToName: orgName,
-      remitToAddress: 'San Diego, CA 92101',
+      remitToName: org?.servicing_remit_to_name || orgName,
+      remitToAddress: org?.servicing_remit_to_address || 'Contact your servicer for remit-to info',
+      remitToWireInstructions: org?.servicing_wire_instructions || undefined,
     });
   };
 

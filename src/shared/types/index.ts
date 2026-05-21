@@ -51,6 +51,16 @@ export interface Organization {
   id: string;
   name: string;
   slug?: string;
+  logo_url?: string | null;
+  // Public-facing servicing remit-to (appears on payoff statements,
+  // welcome letters, periodic statements). Raw bank-account numbers
+  // live in Plaid Transfer's account configuration, not here.
+  servicing_remit_to_name?: string | null;
+  servicing_remit_to_address?: string | null;
+  servicing_wire_instructions?: string | null;
+  servicing_phone?: string | null;
+  servicing_email?: string | null;
+  servicing_business_hours?: string | null;
 }
 
 export interface OrganizationMember {

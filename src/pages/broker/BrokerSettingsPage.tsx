@@ -85,6 +85,61 @@ export function BrokerSettingsPage() {
     }
   };
 
+  // Servicing remit-to (org-level; appears on payoff statements + welcome letters)
+  const [svcRemitName, setSvcRemitName] = useState('');
+  const [svcRemitAddress, setSvcRemitAddress] = useState('');
+  const [svcWireInstructions, setSvcWireInstructions] = useState('');
+  const [svcPhone, setSvcPhone] = useState('');
+  const [svcEmail, setSvcEmail] = useState('');
+  const [svcBusinessHours, setSvcBusinessHours] = useState('');
+  const [savingServicing, setSavingServicing] = useState(false);
+
+  // Load servicing fields once orgId is known
+  useEffect(() => {
+    if (!orgId) return;
+    (async () => {
+      const { data } = await supabase
+        .from('organizations')
+        .select('servicing_remit_to_name, servicing_remit_to_address, servicing_wire_instructions, servicing_phone, servicing_email, servicing_business_hours')
+        .eq('id', orgId)
+        .maybeSingle();
+      if (data) {
+        setSvcRemitName(data.servicing_remit_to_name || '');
+        setSvcRemitAddress(data.servicing_remit_to_address || '');
+        setSvcWireInstructions(data.servicing_wire_instructions || '');
+        setSvcPhone(data.servicing_phone || '');
+        setSvcEmail(data.servicing_email || '');
+        setSvcBusinessHours(data.servicing_business_hours || '');
+      }
+    })();
+  }, [orgId]);
+
+  const handleSaveServicing = async () => {
+    if (!orgId) return;
+    setSavingServicing(true);
+    setError(null);
+    try {
+      const { error: e } = await supabase
+        .from('organizations')
+        .update({
+          servicing_remit_to_name: svcRemitName || null,
+          servicing_remit_to_address: svcRemitAddress || null,
+          servicing_wire_instructions: svcWireInstructions || null,
+          servicing_phone: svcPhone || null,
+          servicing_email: svcEmail || null,
+          servicing_business_hours: svcBusinessHours || null,
+        })
+        .eq('id', orgId);
+      if (e) throw e;
+      setSuccess('Servicing settings saved');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save servicing settings');
+    } finally {
+      setSavingServicing(false);
+    }
+  };
+
   // Valora AMC
   const [valoraUsername, setValoraUsername] = useState('');
   const [valoraPassword, setValoraPassword] = useState('');
@@ -582,6 +637,99 @@ export function BrokerSettingsPage() {
         </div>
       </div>
 
+
+      {/* Servicing — public remit-to info (org-level) */}
+      <div className="border border-gray-200 rounded-xl bg-white p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+            <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21h18M5 21V9l7-4 7 4v12M9 21V13h6v8" /></svg>
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Servicing — Public Remit-To</h2>
+            <p className="text-sm text-gray-500">
+              Where borrowers (and title companies) send payoff wires + checks. Public-safe info only — never paste full account numbers here.
+              Bank-account setup for ACH collection happens in the{' '}
+              <a href="https://dashboard.plaid.com/transfer" target="_blank" rel="noopener noreferrer" className="text-teal-700 underline">Plaid Transfer dashboard</a>.
+            </p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Remit-To Name</label>
+            <input
+              type="text"
+              value={svcRemitName}
+              onChange={e => setSvcRemitName(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+              placeholder="Key Real Estate Capital"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Remit-To Mailing Address</label>
+            <textarea
+              value={svcRemitAddress}
+              onChange={e => setSvcRemitAddress(e.target.value)}
+              rows={3}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+              placeholder={'Key Real Estate Capital\n555 Loan Ln, Suite 100\nSan Diego, CA 92101'}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Wire Instructions (public-safe text)</label>
+            <textarea
+              value={svcWireInstructions}
+              onChange={e => setSvcWireInstructions(e.target.value)}
+              rows={4}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 font-mono"
+              placeholder={'Beneficiary Bank: First Citizens Bank\nABA / Routing #: 053100300\nAccount ending in 1234\nFor credit to: Key Real Estate Capital LLC\nReference: <loan number>'}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Standard practice: include routing # but show only the last 4 of the account #. Full account # belongs in your Plaid Transfer config, not here.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Servicer Phone</label>
+              <input
+                type="tel"
+                value={svcPhone}
+                onChange={e => setSvcPhone(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                placeholder="(925) 989-9386"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Servicer Email</label>
+              <input
+                type="email"
+                value={svcEmail}
+                onChange={e => setSvcEmail(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+                placeholder="servicing@keyrealestatecapital.com"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Business Hours</label>
+            <input
+              type="text"
+              value={svcBusinessHours}
+              onChange={e => setSvcBusinessHours(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-600"
+              placeholder="Mon-Fri 9am-5pm Pacific"
+            />
+          </div>
+          <div className="pt-1">
+            <button
+              onClick={handleSaveServicing}
+              disabled={savingServicing}
+              className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50"
+            >
+              {savingServicing ? 'Saving…' : 'Save Servicing Settings'}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Team Management */}
       <div className="border border-gray-200 rounded-xl bg-white p-6">
