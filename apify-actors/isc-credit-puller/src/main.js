@@ -221,6 +221,11 @@ async function runPullCredit(input) {
 
         log.info(`Got SMS code (${code.length} digits) — entering into ISC`);
         await typeMfaCode(page, code);
+        // Verify what was actually entered by reading the displayAnswer span
+        try {
+          const entered = await page.locator('#displayAnswer').innerText({ timeout: 2000 }).catch(() => '');
+          log.info(`displayAnswer after typing: "${entered}" (expected ${code.length} chars)`);
+        } catch { /* noop */ }
 
         // Check the "Install/Trust this device" checkbox — this is the
         // key step. Once checked, ISC drops a long-lived device cookie
@@ -246,21 +251,40 @@ async function runPullCredit(input) {
         try {
           const contBtn = page.locator('input[name="ctrlEnterAuthCode$btnContinue"]');
           if (await contBtn.count() > 0) {
+            log.info('Clicking Continue button');
             await contBtn.first().click({ timeout: 8_000 });
           } else {
-            // Fallback to any visible submit
             const submitBtn = page.getByRole('button', { name: /^(submit|continue|verify|next|enter|ok|confirm|sign in|log in)$/i })
               .or(page.locator('input[type="submit"]'));
             if (await submitBtn.count() > 0) {
+              log.info('Clicking fallback submit');
               await submitBtn.first().click({ timeout: 8_000 });
+            } else {
+              log.warning('No Continue/submit button found!');
             }
           }
         } catch (contErr) {
           log.warning(`Failed to click Continue: ${contErr?.message || contErr}`);
         }
         try {
-          await page.waitForLoadState('networkidle', { timeout: 10_000 });
+          await page.waitForLoadState('networkidle', { timeout: 15_000 });
         } catch { /* still settling */ }
+
+        // Always capture the post-Continue state so we can see what ISC
+        // says (inline error like "Invalid code", redirect, etc.) without
+        // round-tripping for another diagnostic build.
+        log.info(`Post-Continue URL: ${page.url()}`);
+        try {
+          const shot = await page.screenshot({ fullPage: true });
+          await ActorRef.setValue('post_continue_screenshot.png', shot, { contentType: 'image/png' });
+          const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '');
+          await ActorRef.setValue('post_continue_body.txt', bodyText.slice(0, 5000), { contentType: 'text/plain' });
+          const html = await page.content();
+          await ActorRef.setValue('post_continue.html', html, { contentType: 'text/html' });
+          log.info(`Post-Continue snapshot saved: ${bodyText.length} chars of body text`);
+        } catch (snapErr) {
+          log.warning(`Post-Continue snapshot failed: ${snapErr?.message || snapErr}`);
+        }
 
         await ActorRef.setValue('mfa_status.json', { state: 'submitted', timestamp: Date.now() });
         await ActorRef.setValue('mfa_code.txt', null);
