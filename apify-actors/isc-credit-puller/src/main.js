@@ -181,6 +181,26 @@ async function runPullCredit(input) {
           log.warning(`Failed to capture auth-code snapshot: ${snapErr?.message || snapErr}`);
         }
 
+        // ISC's auth-code page does NOT auto-send the SMS on page load —
+        // there's a "Send" button (input[name=ctrlEnterAuthCode$btnSend])
+        // that has to be clicked first. This is the root cause of "no SMS
+        // arrived" from prior runs.
+        try {
+          const sendBtn = page.locator('input[name="ctrlEnterAuthCode$btnSend"]');
+          if (await sendBtn.count() > 0) {
+            log.info('Clicking ISC "Send" button to trigger SMS');
+            await sendBtn.first().click({ timeout: 8_000 });
+            // ISC re-renders the page (it's a server-side postback). Wait
+            // briefly so the keypad + chkInstall + continue button are ready.
+            await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {});
+            await page.waitForTimeout(1500);
+          } else {
+            log.warning('Send button not found — SMS may not be triggered');
+          }
+        } catch (sendErr) {
+          log.warning(`Failed to click Send button: ${sendErr?.message || sendErr}`);
+        }
+
         await ActorRef.setValue('mfa_status.json', { state: 'awaiting_code', url, timestamp: Date.now() });
 
         let code = null;
@@ -202,21 +222,47 @@ async function runPullCredit(input) {
         log.info(`Got SMS code (${code.length} digits) — entering into ISC`);
         await typeMfaCode(page, code);
 
-        // Try to submit. ISC's auth-code page typically auto-submits after
-        // the last digit; if not, click any visible Submit/Continue/Verify.
+        // Check the "Install/Trust this device" checkbox — this is the
+        // key step. Once checked, ISC drops a long-lived device cookie
+        // that bypasses MFA on subsequent logins from the same session
+        // storage. Our edge function persists that storageState to
+        // user_accounts.isc_session_state so the next pull just works.
         try {
-          await page.waitForLoadState('networkidle', { timeout: 8_000 });
-        } catch { /* page might still be settling */ }
-        if (ON_AUTHCODE_PAGE.test(page.url())) {
-          const submitBtn = page.getByRole('button', { name: /^(submit|continue|verify|next|enter|ok|confirm|sign in|log in)$/i })
-            .or(page.locator('input[type="submit"]'));
-          if (await submitBtn.count() > 0) {
-            await submitBtn.first().click({ timeout: 8_000 }).catch(() => {});
+          const trustBox = page.locator('input[name="ctrlEnterAuthCode$chkInstall"]');
+          if (await trustBox.count() > 0) {
+            const isChecked = await trustBox.first().isChecked().catch(() => false);
+            if (!isChecked) {
+              log.info('Checking "Trust this device" (chkInstall) so the device cookie persists');
+              await trustBox.first().check({ timeout: 5_000 });
+            }
+          } else {
+            log.warning('chkInstall checkbox not found — device trust will not persist');
           }
+        } catch (trustErr) {
+          log.warning(`Failed to check trust-device box: ${trustErr?.message || trustErr}`);
         }
 
+        // Click Continue. ISC uses input[name=ctrlEnterAuthCode$btnContinue]
+        try {
+          const contBtn = page.locator('input[name="ctrlEnterAuthCode$btnContinue"]');
+          if (await contBtn.count() > 0) {
+            await contBtn.first().click({ timeout: 8_000 });
+          } else {
+            // Fallback to any visible submit
+            const submitBtn = page.getByRole('button', { name: /^(submit|continue|verify|next|enter|ok|confirm|sign in|log in)$/i })
+              .or(page.locator('input[type="submit"]'));
+            if (await submitBtn.count() > 0) {
+              await submitBtn.first().click({ timeout: 8_000 });
+            }
+          }
+        } catch (contErr) {
+          log.warning(`Failed to click Continue: ${contErr?.message || contErr}`);
+        }
+        try {
+          await page.waitForLoadState('networkidle', { timeout: 10_000 });
+        } catch { /* still settling */ }
+
         await ActorRef.setValue('mfa_status.json', { state: 'submitted', timestamp: Date.now() });
-        // Clear the code so a future pull-of-the-same-store doesn't reuse it
         await ActorRef.setValue('mfa_code.txt', null);
         mfaHandled = true;
       }
