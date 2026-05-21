@@ -1,17 +1,45 @@
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, HelpCircle, Home, FileText, Briefcase } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { LogOut, HelpCircle, Home, FileText, Briefcase, Banknote } from 'lucide-react';
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   { label: 'Home', path: '/application', icon: Home },
   { label: 'Documents', path: '/application/documents', icon: FileText },
   { label: 'My Loans', path: '/application/loans', icon: Briefcase },
 ];
 
+const SERVICING_NAV_ITEM = { label: 'My Loan', path: '/application/servicing', icon: Banknote };
+
 export function BorrowerLayout() {
-  const { userAccount, signOut } = useAuth();
+  const { user, userAccount, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [hasServicedLoans, setHasServicedLoans] = useState(false);
+
+  // Only show the "My Loan" servicing nav item when this borrower has at
+  // least one closed serviced loan. Otherwise the LOS workflow is untouched.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const { data: b } = await supabase
+        .from('borrowers')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (!b || cancelled) return;
+      const { count } = await supabase
+        .from('serviced_loans')
+        .select('id', { count: 'exact', head: true })
+        .eq('borrower_id', b.id);
+      if (!cancelled) setHasServicedLoans((count || 0) > 0);
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const NAV_ITEMS = hasServicedLoans ? [...BASE_NAV_ITEMS, SERVICING_NAV_ITEM] : BASE_NAV_ITEMS;
 
   const handleSignOut = async () => {
     await signOut();

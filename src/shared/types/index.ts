@@ -501,6 +501,97 @@ export interface PlacementResult {
   explanation: string;
 }
 
+// ============================================
+// Loan Servicing
+// ============================================
+
+export type ServicingStatus = 'active' | 'paid_off' | 'delinquent' | 'in_foreclosure' | 'transferred';
+
+export interface ServicedLoan {
+  id: string;
+  organization_id: string;
+  borrower_id: string;
+  loan_number: string;
+  property_address: string | null;
+  property_city: string | null;
+  property_state: string | null;
+  property_zip: string | null;
+  original_principal: number;
+  current_principal: number;
+  interest_rate: number;            // decimal, e.g. 0.0725 for 7.25%
+  amortization_term_months: number;
+  loan_term_months: number;
+  payment_frequency: 'monthly' | 'biweekly' | 'weekly';
+  origination_date: string;         // ISO yyyy-mm-dd
+  first_payment_date: string;
+  maturity_date: string;
+  next_payment_due_date: string | null;
+  escrow_taxes_monthly: number;
+  escrow_insurance_monthly: number;
+  escrow_balance: number;
+  servicing_status: ServicingStatus;
+  late_fee_amount: number;
+  grace_period_days: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SchedulePaymentStatus = 'scheduled' | 'paid' | 'partial' | 'skipped' | 'late';
+
+export interface ServicedLoanScheduleRow {
+  id: string;
+  serviced_loan_id: string;
+  payment_number: number;
+  due_date: string;
+  scheduled_principal: number;
+  scheduled_interest: number;
+  scheduled_escrow: number;
+  scheduled_total: number;
+  ending_balance: number;
+  status: SchedulePaymentStatus;
+  created_at: string;
+}
+
+export type ServicedLoanPaymentStatus = 'pending' | 'posted' | 'failed' | 'returned' | 'reversed';
+
+export interface ServicedLoanPayment {
+  id: string;
+  serviced_loan_id: string;
+  schedule_id: string | null;
+  amount: number;
+  principal_applied: number;
+  interest_applied: number;
+  escrow_applied: number;
+  fees_applied: number;
+  payment_method: 'ach' | 'wire' | 'check' | 'manual' | 'card_one_time';
+  provider: 'plaid_transfer' | 'manual' | null;
+  provider_transfer_id: string | null;
+  provider_authorization_id: string | null;
+  status: ServicedLoanPaymentStatus;
+  failure_reason: string | null;
+  initiated_at: string;
+  posted_at: string | null;
+  returned_at: string | null;
+}
+
+export interface ServicedLoanAchAuthorization {
+  id: string;
+  serviced_loan_id: string;
+  provider: 'plaid_transfer';
+  provider_account_id: string | null;
+  provider_access_token_encrypted: string | null;  // service-role only at runtime
+  authorization_id: string | null;
+  authorized_amount_ceiling: number | null;
+  account_mask: string | null;
+  bank_name: string | null;
+  account_holder_name: string | null;
+  status: 'active' | 'revoked' | 'expired';
+  authorized_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+}
+
 export interface Notification {
   id: string;
   user_id: string;

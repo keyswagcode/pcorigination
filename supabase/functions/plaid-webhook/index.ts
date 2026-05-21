@@ -56,6 +56,143 @@ serve(async (req) => {
 
     const { webhook_type, webhook_code, user_id: plaidUserId } = payload
 
+    const serviceClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // ============================================
+    // Plaid Transfer events (loan servicing ACH debits)
+    // ============================================
+    if (webhook_type === 'TRANSFER' || webhook_type === 'TRANSFER_EVENTS_UPDATE') {
+      // Plaid's prescribed pattern: poll /transfer/event/sync from our last
+      // known event_id and apply each event to the matching payment row.
+      const { data: lastEventRow } = await serviceClient
+        .from('serviced_loan_payments')
+        .select('id')
+        .order('initiated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      // For simplicity, sync from 0 every webhook. Plaid returns events in
+      // batches of 25; we loop until empty.
+      let afterId = 0
+      let applied = 0
+      let safety = 0
+      while (safety++ < 20) {
+        const sync = await plaidRequest('/transfer/event/sync', {
+          after_id: afterId,
+          count: 25,
+        })
+        const events = (sync.transfer_events || []) as Array<{
+          event_id: number
+          event_type: string
+          transfer_id: string
+          failure_reason?: { ach_return_code?: string; description?: string }
+        }>
+        if (events.length === 0) break
+        for (const ev of events) {
+          afterId = Math.max(afterId, ev.event_id)
+          // Map Plaid event_type → our status
+          const statusMap: Record<string, string> = {
+            posted: 'posted',
+            settled: 'posted',
+            failed: 'failed',
+            returned: 'returned',
+            reversed: 'reversed',
+            cancelled: 'failed',
+            pending: 'pending',
+          }
+          const newStatus = statusMap[ev.event_type]
+          if (!newStatus) continue
+
+          const { data: pmt } = await serviceClient
+            .from('serviced_loan_payments')
+            .select('id, serviced_loan_id, schedule_id, amount, status')
+            .eq('provider_transfer_id', ev.transfer_id)
+            .maybeSingle()
+          if (!pmt) continue
+          if (pmt.status === newStatus) continue
+
+          // On posted: split into P/I/Escrow based on the matching schedule row,
+          // apply principal to serviced_loans.current_principal, mark schedule.
+          if (newStatus === 'posted' && pmt.schedule_id) {
+            const { data: sched } = await serviceClient
+              .from('serviced_loan_schedule')
+              .select('scheduled_principal, scheduled_interest, scheduled_escrow')
+              .eq('id', pmt.schedule_id)
+              .maybeSingle()
+            if (sched) {
+              await serviceClient
+                .from('serviced_loan_payments')
+                .update({
+                  status: 'posted',
+                  principal_applied: sched.scheduled_principal,
+                  interest_applied: sched.scheduled_interest,
+                  escrow_applied: sched.scheduled_escrow,
+                  posted_at: new Date().toISOString(),
+                })
+                .eq('id', pmt.id)
+              await serviceClient
+                .from('serviced_loan_schedule')
+                .update({ status: 'paid' })
+                .eq('id', pmt.schedule_id)
+              // Decrement principal + accrue escrow on the loan
+              const { data: loan } = await serviceClient
+                .from('serviced_loans')
+                .select('current_principal, escrow_balance, escrow_taxes_monthly, escrow_insurance_monthly, next_payment_due_date')
+                .eq('id', pmt.serviced_loan_id)
+                .maybeSingle()
+              if (loan) {
+                await serviceClient
+                  .from('serviced_loans')
+                  .update({
+                    current_principal: Math.max(0, Number(loan.current_principal) - Number(sched.scheduled_principal)),
+                    escrow_balance: Number(loan.escrow_balance) + Number(sched.scheduled_escrow),
+                  })
+                  .eq('id', pmt.serviced_loan_id)
+                // Move next_payment_due_date to the next 'scheduled' row
+                const { data: nextSched } = await serviceClient
+                  .from('serviced_loan_schedule')
+                  .select('due_date')
+                  .eq('serviced_loan_id', pmt.serviced_loan_id)
+                  .eq('status', 'scheduled')
+                  .order('payment_number', { ascending: true })
+                  .limit(1)
+                  .maybeSingle()
+                if (nextSched) {
+                  await serviceClient
+                    .from('serviced_loans')
+                    .update({ next_payment_due_date: nextSched.due_date })
+                    .eq('id', pmt.serviced_loan_id)
+                }
+              }
+              applied++
+            }
+          } else {
+            // returned / failed / reversed — record on the payment row, don't touch schedule
+            const update: Record<string, unknown> = { status: newStatus }
+            if (newStatus === 'returned') {
+              update.returned_at = new Date().toISOString()
+              update.failure_reason = ev.failure_reason?.description || ev.failure_reason?.ach_return_code || null
+            }
+            if (newStatus === 'failed') {
+              update.failure_reason = ev.failure_reason?.description || ev.failure_reason?.ach_return_code || null
+            }
+            await serviceClient
+              .from('serviced_loan_payments')
+              .update(update)
+              .eq('id', pmt.id)
+          }
+        }
+        if (events.length < 25) break
+      }
+      // Silence unused var warning
+      void lastEventRow
+      return new Response(JSON.stringify({ ok: true, applied }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     // Only handle Plaid Check report events for now
     if (webhook_type !== 'CHECK_REPORT') {
       return new Response(JSON.stringify({ ok: true, ignored: webhook_type }), {
@@ -69,11 +206,6 @@ serve(async (req) => {
         headers: { 'Content-Type': 'application/json' },
       })
     }
-
-    const serviceClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
 
     const { data: borrower, error: borrowerError } = await serviceClient
       .from('borrowers')

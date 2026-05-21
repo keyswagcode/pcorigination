@@ -25,6 +25,11 @@ import { BrokerLoanReviewPage } from './pages/broker/BrokerLoanReviewPage';
 import { BrokerSettingsPage } from './pages/broker/BrokerSettingsPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { CoBorrowerInvitePage } from './pages/CoBorrowerInvitePage';
+import { BorrowerServicingPage } from './pages/borrower/BorrowerServicingPage';
+import { BorrowerServicedLoanPage } from './pages/borrower/BorrowerServicedLoanPage';
+import { AdminServicingListPage } from './pages/internal/AdminServicingListPage';
+import { OnboardServicedLoanPage } from './pages/internal/OnboardServicedLoanPage';
+import { AdminServicedLoanDetailPage } from './pages/internal/AdminServicedLoanDetailPage';
 
 function LoginGuard() {
   const { user, userAccount, isLoading, accountFetched } = useAuth();
@@ -157,6 +162,8 @@ function AppRoutes() {
           <Route path="loans" element={<BorrowerLoansPage />} />
           <Route path="loans/:loanId" element={<BorrowerLoanEditPage />} />
           <Route path="new-loan" element={<NewLoanPage />} />
+          <Route path="servicing" element={<BorrowerServicingPage />} />
+          <Route path="servicing/:loanId" element={<BorrowerServicedLoanPage />} />
         </Route>
 
         <Route path="/borrower" element={<Navigate to="/application" replace />} />
@@ -185,6 +192,9 @@ function AppRoutes() {
           <Route path="loans" element={<AllLoansPage />} />
           <Route path="files" element={<AllFilesPage />} />
           <Route path="applications" element={<AllApplicationsPage />} />
+          <Route path="servicing" element={<AdminServicingListPage />} />
+          <Route path="servicing/new" element={<OnboardServicedLoanPage />} />
+          <Route path="servicing/:loanId" element={<AdminServicedLoanDetailPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

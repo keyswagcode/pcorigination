@@ -13,7 +13,8 @@ import {
   Settings,
   Briefcase,
   FileText,
-  ClipboardList
+  ClipboardList,
+  PiggyBank
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -30,6 +31,7 @@ const adminNavItems = [
   { to: '/internal/applications', icon: ClipboardList, label: 'All Applications' },
   { to: '/internal/loans', icon: Briefcase, label: 'All Loans' },
   { to: '/internal/files', icon: FileText, label: 'All Files' },
+  { to: '/internal/servicing', icon: PiggyBank, label: 'Loan Servicing' },
   { to: '/internal/placerbot', icon: Bot, label: 'PlacerBot' },
   { to: '/internal/settings', icon: Settings, label: 'Settings' },
 ];
