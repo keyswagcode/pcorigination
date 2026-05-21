@@ -400,18 +400,22 @@ async function runPullCredit(input) {
   }
 }
 
-// Enter the SMS code into ISC's auth-code page. ISC specifically renders
-// a numeric keypad (1-9 as <button>N</button>, plus an unlabeled button
-// for 0). Other Meridian Link customer deployments may use a plain text
-// input — so we try input first, fall back to keypad.
+// Enter the SMS code into ISC's auth-code page. ISC uses a SCRAMBLED
+// numeric keypad as an anti-bot measure: the visible <b>N</b> label
+// does NOT correspond to the digit entered. The actual digit lives in
+// the onclick handler — onclick="touch('X')" means clicking that
+// button enters digit X regardless of what the label says. Labels also
+// wipe on hover. So we select by onclick handler.
+//
+// Other Meridian Link customer deployments may use a plain text input —
+// try that first.
 async function typeMfaCode(page, code) {
   const digits = String(code).replace(/\D/g, '');
   if (!digits) throw new Error('typeMfaCode called with no digits');
 
-  // Only match real text-style inputs. We deliberately do NOT match on
-  // name*="code" / id*="code" any more — ISC's btnSend button has
-  // name="ctrlEnterAuthCode$btnSend" which contains "code" and got
-  // matched on a prior build, causing a fill on a submit button.
+  // Only match real text-style inputs. Deliberately do NOT match on
+  // name*="code"/id*="code" — those incorrectly matched ISC's
+  // btnSend on a prior build.
   const codeInput = page.locator(
     'input[type="text"]:visible, input[type="tel"]:visible, input[type="number"]:visible, input[type="password"]:visible, input:not([type]):visible'
   ).first();
@@ -420,26 +424,18 @@ async function typeMfaCode(page, code) {
     return;
   }
 
-  // Numeric-keypad fallback — click one button per digit
   for (const d of digits) {
-    let btn = page.locator(`button:visible:has-text("${d}"), [role="button"]:visible:has-text("${d}")`).first();
+    // Primary: ISC-style scrambled keypad — onclick handler tells the truth
+    let btn = page.locator(`button[onclick*="touch('${d}')"]:visible`).first();
     if (await btn.count() === 0) {
-      // Some sites render keypad digits as input[type=button][value=N]
-      btn = page.locator(`input[type="button"][value="${d}"]:visible`).first();
-    }
-    if (await btn.count() === 0 && d === '0') {
-      // ISC's "0" button has no text label (likely styled with a <span>
-      // or background image). Last-resort: any visible <input type="button">
-      // without a value attribute among the keypad. Practical risk: this
-      // could match an unrelated button — but in observed snapshots the
-      // only unlabeled keypad-area button IS the 0 key.
-      btn = page.locator('input[type="button"]:visible:not([value]), button:visible:not(:has-text(/.+/))').first();
+      // Fallback for unscrambled keypads: label-based
+      btn = page.locator(`button:visible:has-text("${d}"), input[type="button"][value="${d}"]:visible`).first();
     }
     if (await btn.count() === 0) {
       throw new Error(`Could not find keypad button for digit "${d}"`);
     }
     await btn.click({ timeout: 5_000 });
-    await page.waitForTimeout(120);
+    await page.waitForTimeout(150);
   }
 }
 
