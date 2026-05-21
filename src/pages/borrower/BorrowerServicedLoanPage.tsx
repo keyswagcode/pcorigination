@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, FileText, Loader2, Banknote, ShieldCheck, AlertCircle } from 'lucide-react';
+import { ArrowLeft, FileText, Loader2, Banknote, ShieldCheck, AlertCircle, DollarSign, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { getServicedLoan, getSchedule, getPayments, getActiveAchAuth } from '../../services/servicingService';
 import { generatePayoffStatementPdf } from '../../lib/payoffStatementGenerator';
 import { perDiemInterest } from '../../lib/amortization';
 import type { ServicedLoan, ServicedLoanScheduleRow, ServicedLoanPayment, ServicedLoanAchAuthorization } from '../../shared/types';
+
+const FUNCTIONS_URL = import.meta.env.VITE_SUPABASE_URL + '/functions/v1';
 
 const fmtCurrency = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
@@ -21,6 +23,11 @@ export function BorrowerServicedLoanPage() {
   const [achAuth, setAchAuth] = useState<ServicedLoanAchAuthorization | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [tab, setTab] = useState<'amortization' | 'history' | 'documents'>('amortization');
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [payAmount, setPayAmount] = useState('');
+  const [submittingPay, setSubmittingPay] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+  const [paySuccess, setPaySuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loanId) return;
@@ -52,6 +59,35 @@ export function BorrowerServicedLoanPage() {
 
   const nextDueRow = schedule.find(r => r.status === 'scheduled');
   const perDiem = perDiemInterest(loan.current_principal, loan.interest_rate);
+
+  const handleOneTimePay = async () => {
+    if (!loan) return;
+    const amt = parseFloat(payAmount);
+    if (!amt || amt < 1) { setPayError('Enter an amount of at least $1.'); return; }
+    setSubmittingPay(true);
+    setPayError(null);
+    setPaySuccess(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not signed in');
+      const res = await fetch(`${FUNCTIONS_URL}/servicing-debit-run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ mode: 'borrower_one_time', serviced_loan_id: loan.id, amount: amt }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Payment failed');
+      setPaySuccess(`Payment of $${amt.toFixed(2)} initiated. It typically posts to your loan within 1–3 business days.`);
+      setPayAmount('');
+      // Refresh payment history
+      const p = await getPayments(loan.id);
+      setPayments(p);
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : 'Payment failed');
+    } finally {
+      setSubmittingPay(false);
+    }
+  };
 
   const handlePayoff = async () => {
     if (!loan) return;
@@ -91,6 +127,16 @@ export function BorrowerServicedLoanPage() {
         </div>
       </div>
 
+      {loan.servicing_status === 'delinquent' && (
+        <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Your loan is past due.</p>
+            <p className="text-xs mt-1">A late fee has been added to your next scheduled payment. Make a payment now or contact us to discuss loss-mitigation options.</p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs uppercase tracking-wide text-gray-500">Current Balance</p>
@@ -129,12 +175,79 @@ export function BorrowerServicedLoanPage() {
 
       <div className="flex items-center justify-end gap-2">
         <button
+          onClick={() => { setShowPayModal(true); setPayError(null); setPaySuccess(null); }}
+          disabled={!achAuth}
+          title={achAuth ? 'Make a one-time payment via your linked bank' : 'Set up Auto-Pay first to link a bank account'}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <DollarSign className="w-4 h-4" /> Make a Payment
+        </button>
+        <button
           onClick={handlePayoff}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100"
         >
           <FileText className="w-4 h-4" /> Request Payoff Statement
         </button>
       </div>
+
+      {showPayModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Make a Payment</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Debits from {achAuth?.bank_name || 'your linked bank'} •••• {achAuth?.account_mask || '----'}. One-time payments apply as a principal curtailment.
+                </p>
+              </div>
+              <button onClick={() => setShowPayModal(false)} disabled={submittingPay} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {paySuccess && (
+              <div className="px-3 py-2 bg-teal-50 border border-teal-100 rounded-lg text-sm text-teal-800">{paySuccess}</div>
+            )}
+            {payError && (
+              <div className="px-3 py-2 bg-red-50 border border-red-100 rounded-lg text-sm text-red-700">{payError}</div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Amount ($)</label>
+              <input
+                type="number"
+                min={1}
+                step={0.01}
+                value={payAmount}
+                onChange={e => setPayAmount(e.target.value)}
+                disabled={submittingPay}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-teal-600 disabled:opacity-50"
+                placeholder="2500.00"
+                autoFocus
+              />
+              <p className="text-xs text-gray-500 mt-1">Any amount from $1 to $100,000.</p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowPayModal(false)}
+                disabled={submittingPay}
+                className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleOneTimePay}
+                disabled={submittingPay || !payAmount}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50"
+              >
+                {submittingPay ? <Loader2 className="w-4 h-4 animate-spin" /> : <DollarSign className="w-4 h-4" />}
+                {submittingPay ? 'Submitting…' : 'Submit Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="border-b border-gray-200 flex gap-1">
         {(['amortization', 'history', 'documents'] as const).map(t => (

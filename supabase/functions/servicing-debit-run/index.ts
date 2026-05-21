@@ -164,6 +164,84 @@ serve(async (req) => {
       return jsonRes({ ok: result.ok, transfer_id: result.transfer_id, error: result.error, mode: PLAID_TRANSFER_MODE })
     }
 
+    if (mode === 'borrower_one_time') {
+      // Borrower-initiated debit for an arbitrary amount. Reuses the same
+      // Plaid Transfer flow as scheduled debits but never references a
+      // schedule_id (so the webhook applies it as a curtailment, not against
+      // a specific scheduled row).
+      const { serviced_loan_id, amount } = body
+      if (!serviced_loan_id || !amount) return jsonRes({ error: 'Missing serviced_loan_id or amount' }, 400)
+      const amt = Number(amount)
+      if (!isFinite(amt) || amt < 1 || amt > 100000) return jsonRes({ error: 'Amount must be 1–100000' }, 400)
+
+      const { data: loan } = await serviceClient
+        .from('serviced_loans')
+        .select('id')
+        .eq('id', serviced_loan_id)
+        .maybeSingle()
+      if (!loan) return jsonRes({ error: 'Loan not found' }, 404)
+
+      const { data: auth } = await serviceClient
+        .from('serviced_loan_ach_authorizations')
+        .select('id, provider_account_id, provider_access_token_encrypted, account_holder_name')
+        .eq('serviced_loan_id', serviced_loan_id)
+        .eq('status', 'active')
+        .order('authorized_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (!auth || !auth.provider_access_token_encrypted) {
+        return jsonRes({ error: 'No active ACH authorization — set up Auto-Pay first' }, 400)
+      }
+
+      let transferId: string | null = null
+      let failureReason: string | null = null
+      try {
+        const authRes = await plaidRequest('/transfer/authorization/create', {
+          access_token: auth.provider_access_token_encrypted,
+          account_id: auth.provider_account_id,
+          type: 'debit',
+          network: 'ach',
+          amount: amt.toFixed(2),
+          ach_class: 'ppd',
+          user: { legal_name: auth.account_holder_name || 'Borrower' },
+          iso_currency_code: 'USD',
+        })
+        if (authRes?.authorization?.decision !== 'approved') {
+          throw new Error(`Plaid rejected: ${authRes?.authorization?.decision_rationale?.description || authRes?.authorization?.decision}`)
+        }
+        const tx = await plaidRequest('/transfer/create', {
+          access_token: auth.provider_access_token_encrypted,
+          account_id: auth.provider_account_id,
+          authorization_id: authRes.authorization.id,
+          description: 'Borrower one-time payment',
+          amount: amt.toFixed(2),
+        })
+        transferId = tx?.transfer?.id || null
+      } catch (e) {
+        failureReason = e instanceof Error ? e.message : String(e)
+      }
+
+      const { data: pmt, error: insErr } = await serviceClient.from('serviced_loan_payments').insert({
+        serviced_loan_id,
+        schedule_id: null,
+        amount: amt,
+        payment_method: 'ach',
+        provider: 'plaid_transfer',
+        provider_transfer_id: transferId,
+        status: transferId ? 'pending' : 'failed',
+        failure_reason: failureReason,
+        initiated_at: new Date().toISOString(),
+      }).select('id').single()
+      if (insErr) return jsonRes({ error: insErr.message }, 500)
+
+      await serviceClient
+        .from('serviced_loan_ach_authorizations')
+        .update({ last_used_at: new Date().toISOString() })
+        .eq('id', auth.id)
+
+      return jsonRes({ ok: !!transferId, payment_id: pmt?.id, transfer_id: transferId, error: failureReason, mode: PLAID_TRANSFER_MODE })
+    }
+
     if (mode === 'cron') {
       const today = new Date().toISOString().slice(0, 10)
       const { data: dueRows, error } = await serviceClient

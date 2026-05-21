@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../components/team/TeamContext';
 import { generateSchedule, monthlyPayment, maturityDateFrom } from '../../lib/amortization';
 import { onboardServicedLoan } from '../../services/servicingService';
+import { generateWelcomeLetterPdf } from '../../lib/welcomeLetterGenerator';
 
 interface BorrowerOption {
   id: string;
@@ -161,6 +162,43 @@ export function OnboardServicedLoanPage() {
         late_fee_amount: parseFloat(lateFee) || 0,
         grace_period_days: parseInt(graceDays) || 0,
       }, user.id);
+
+      // RESPA §1024.39 / §1024.33 — generate the welcome letter PDF and
+      // hand the admin a download immediately on onboard. (Server-side
+      // auto-email + Storage persistence is a P2 follow-up; for now the
+      // admin is responsible for delivering it within 15 days.)
+      try {
+        const borrower = borrowers.find(b => b.id === borrowerId);
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('name, servicing_remit_to_name, servicing_remit_to_address, servicing_phone, servicing_email, servicing_business_hours')
+          .eq('id', organization.id)
+          .maybeSingle();
+        await generateWelcomeLetterPdf({
+          orgName: org?.name || organization.name,
+          servicerName: org?.servicing_remit_to_name || org?.name || organization.name,
+          remitToAddress: org?.servicing_remit_to_address || '(Set in Settings → Servicing)',
+          servicerPhone: org?.servicing_phone || '',
+          servicerEmail: org?.servicing_email || '',
+          servicerBusinessHours: org?.servicing_business_hours || '',
+          borrowerName: borrower?.borrower_name || 'Borrower',
+          loanNumber: loan.loan_number,
+          propertyAddress: [propertyAddress, propertyCity, propertyState, propertyZip].filter(Boolean).join(', '),
+          originalPrincipal: principalNum,
+          interestRatePct: ratePct,
+          amortizationTermMonths: amortN,
+          loanTermMonths: loanN,
+          firstPaymentDate,
+          maturityDate: maturityDateFrom(firstPaymentDate, loanN),
+          scheduledMonthlyPI: piPayment,
+          scheduledEscrowMonthly: escrowMonthly,
+          scheduledTotalMonthly: piPayment + escrowMonthly,
+          servicingEffectiveDate: new Date().toISOString().slice(0, 10),
+        });
+      } catch (welcomeErr) {
+        console.warn('Welcome letter generation failed (non-fatal):', welcomeErr);
+      }
+
       navigate(`/internal/servicing/${loan.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to onboard loan');

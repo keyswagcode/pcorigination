@@ -10,6 +10,96 @@ const PLAID_BASE_URL = PLAID_ENV === 'production'
   ? 'https://production.plaid.com'
   : 'https://sandbox.plaid.com'
 
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') || ''
+
+// Reg X §1024.39 — notice of returned ACH to borrower (+ copy to servicer)
+async function sendReturnedPaymentNotice(
+  serviceClient: ReturnType<typeof createClient>,
+  paymentId: string,
+  servicedLoanId: string,
+  amount: number,
+  reason: string | null,
+) {
+  if (!RESEND_API_KEY) {
+    console.warn('RESEND_API_KEY not set — skipping returned-payment notice')
+    return
+  }
+  // Look up borrower + loan + servicer email
+  const { data: loan } = await serviceClient
+    .from('serviced_loans')
+    .select('loan_number, organization_id, borrower_id')
+    .eq('id', servicedLoanId)
+    .maybeSingle()
+  if (!loan) return
+  const { data: borrower } = await serviceClient
+    .from('borrowers')
+    .select('borrower_name, email')
+    .eq('id', loan.borrower_id)
+    .maybeSingle()
+  const { data: org } = await serviceClient
+    .from('organizations')
+    .select('name, servicing_remit_to_name, servicing_email, servicing_phone')
+    .eq('id', loan.organization_id)
+    .maybeSingle()
+  if (!borrower?.email) {
+    console.warn('No borrower email — skipping returned-payment notice')
+    return
+  }
+
+  const servicer = org?.servicing_remit_to_name || org?.name || 'your servicer'
+  const phone = org?.servicing_phone || '(contact info on file)'
+  const servicerEmail = org?.servicing_email || null
+  const fmtAmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
+
+  const subject = `Notice of Returned Payment — Loan ${loan.loan_number}`
+  const body = `Dear ${borrower.borrower_name?.split(' ')[0] || 'Borrower'},
+
+This notice is to inform you that a recent ACH payment of ${fmtAmt} on loan ${loan.loan_number} was returned by your bank${reason ? ` (reason: ${reason})` : ''}.
+
+What this means
+- The amount has NOT been applied to your loan.
+- Depending on your bank's policy, you may also be charged a returned-item fee by your bank.
+- Per the terms of your note, a late fee may apply if the balance is not brought current within the grace period on your account.
+
+What to do next
+- Confirm sufficient funds are available in the bank account on file, then make a one-time payment from your borrower portal, OR
+- Contact ${servicer} at ${phone}${servicerEmail ? ` / ${servicerEmail}` : ''} to discuss alternative payment arrangements.
+
+If you are experiencing financial hardship, you may be eligible for loss-mitigation options. You can also contact a HUD-approved housing counselor at no cost: 1-800-569-4287.
+
+This notice is provided pursuant to 12 CFR §1024.39 (Regulation X).
+
+Sincerely,
+${servicer} Servicing
+`
+
+  const to = [borrower.email]
+  if (servicerEmail) to.push(servicerEmail)
+
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: servicerEmail || 'servicing@keyrealestatecapital.com',
+        to,
+        subject,
+        text: body,
+      }),
+    })
+    if (!res.ok) {
+      const t = await res.text().catch(() => '')
+      console.error('Resend returned-payment notice failed:', res.status, t.slice(0, 200))
+    }
+  } catch (e) {
+    console.error('Resend send failed (non-fatal):', e)
+  }
+  void paymentId
+}
+
 async function plaidRequest(endpoint: string, body: Record<string, unknown>) {
   const res = await fetch(`${PLAID_BASE_URL}${endpoint}`, {
     method: 'POST',
@@ -168,20 +258,61 @@ serve(async (req) => {
               }
               applied++
             }
+          } else if (newStatus === 'posted' && !pmt.schedule_id) {
+            // Borrower-initiated one-time payment (no schedule_id). Apply
+            // the amount as a principal curtailment. (P2: full waterfall
+            // — late fees first, then escrow, then accrued interest, then
+            // principal. For MVP we treat one-time payments as straight
+            // principal curtailments.)
+            const { data: loan } = await serviceClient
+              .from('serviced_loans')
+              .select('current_principal')
+              .eq('id', pmt.serviced_loan_id)
+              .maybeSingle()
+            await serviceClient
+              .from('serviced_loan_payments')
+              .update({
+                status: 'posted',
+                principal_applied: pmt.amount,
+                interest_applied: 0,
+                escrow_applied: 0,
+                posted_at: new Date().toISOString(),
+              })
+              .eq('id', pmt.id)
+            if (loan) {
+              await serviceClient
+                .from('serviced_loans')
+                .update({ current_principal: Math.max(0, Number(loan.current_principal) - Number(pmt.amount)) })
+                .eq('id', pmt.serviced_loan_id)
+            }
+            applied++
           } else {
             // returned / failed / reversed — record on the payment row, don't touch schedule
             const update: Record<string, unknown> = { status: newStatus }
+            const failReason = ev.failure_reason?.description || ev.failure_reason?.ach_return_code || null
             if (newStatus === 'returned') {
               update.returned_at = new Date().toISOString()
-              update.failure_reason = ev.failure_reason?.description || ev.failure_reason?.ach_return_code || null
+              update.failure_reason = failReason
             }
             if (newStatus === 'failed') {
-              update.failure_reason = ev.failure_reason?.description || ev.failure_reason?.ach_return_code || null
+              update.failure_reason = failReason
             }
             await serviceClient
               .from('serviced_loan_payments')
               .update(update)
               .eq('id', pmt.id)
+
+            // Reg X §1024.39 returned-payment notice (best-effort; email
+            // failure shouldn't fail the whole webhook)
+            if (newStatus === 'returned' || newStatus === 'failed') {
+              await sendReturnedPaymentNotice(
+                serviceClient,
+                pmt.id,
+                pmt.serviced_loan_id,
+                Number(pmt.amount),
+                failReason,
+              ).catch(e => console.error('sendReturnedPaymentNotice:', e))
+            }
           }
         }
         if (events.length < 25) break
