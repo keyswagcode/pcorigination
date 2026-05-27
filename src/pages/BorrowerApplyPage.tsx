@@ -107,6 +107,19 @@ export function BorrowerApplyPage() {
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
   };
 
+  // Plaid requires a valid phone in the user identity for the credit pull
+  // (consumer_report_permissible_purpose). Mirror the NANP rules the
+  // plaid-link edge function enforces so a bad number is caught here instead
+  // of stranding the borrower with a 500 at the bank-link step.
+  const isValidNanpPhone = (value: string) => {
+    const raw = value.replace(/\D/g, '');
+    const ten = raw.length === 11 && raw.startsWith('1') ? raw.slice(1) : raw;
+    return ten.length === 10
+      && /^[2-9]/.test(ten)            // area code first digit 2-9
+      && /^.{3}[2-9]/.test(ten)        // exchange first digit 2-9
+      && !(ten.slice(3, 6) === '555' && ten.slice(6, 8) === '01'); // 555-01XX reserved
+  };
+
   const formatSSN = (value: string) => {
     const digits = value.replace(/\D/g, '').slice(0, 9);
     if (digits.length <= 3) return digits;
@@ -158,6 +171,12 @@ export function BorrowerApplyPage() {
     const userId = createdUserId || user?.id;
     if (!userId) {
       setError('No user session found. Please try again.');
+      setIsLoading(false);
+      return;
+    }
+
+    if (!isValidNanpPhone(phone)) {
+      setError('Please enter a valid US mobile number — it is required to verify your identity.');
       setIsLoading(false);
       return;
     }
@@ -218,7 +237,8 @@ export function BorrowerApplyPage() {
     }
   };
 
-  const profileComplete = firstName && lastName && phone && dateOfBirth && ssn.replace(/\D/g, '').length === 9 && creditScore && addressStreet && addressCity && addressState && addressZip && creditConsent;
+  const phoneValid = isValidNanpPhone(phone);
+  const profileComplete = firstName && lastName && phoneValid && dateOfBirth && ssn.replace(/\D/g, '').length === 9 && creditScore && addressStreet && addressCity && addressState && addressZip && creditConsent;
 
   if (brokerValid === null) {
     return (
@@ -450,9 +470,12 @@ export function BorrowerApplyPage() {
                     value={phone}
                     onChange={e => setPhone(formatPhone(e.target.value))}
                     className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
-                    placeholder="(555) 123-4567"
+                    placeholder="(415) 867-5309"
                     required
                   />
+                  {phone && !phoneValid && (
+                    <p className="text-xs text-red-600 mt-1">Please enter a valid US mobile number — it's required to verify your identity.</p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
