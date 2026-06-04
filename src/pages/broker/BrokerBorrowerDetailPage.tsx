@@ -298,7 +298,7 @@ export function BrokerBorrowerDetailPage() {
       });
       setPullRunId(start.runId);
       setPullLiveViewUrl(start.liveViewUrl);
-      setPullStatusMessage('Working in ISC… if SMS MFA is required, use the link below to enter the code.');
+      setPullStatusMessage('Working in ISC… if an SMS code is required, a box will appear below for you to enter it.');
 
       // Poll until done
       const poll = async () => {
@@ -309,9 +309,11 @@ export function BrokerBorrowerDetailPage() {
           if (status.mfaRequired) {
             setMfaRequired(true);
             setPullStatusMessage('ISC sent an SMS code to your phone. Type it below to continue.');
-          } else if (mfaRequired) {
-            // Actor moved past the auth-code page after we submitted the code
-            setMfaRequired(false);
+          } else {
+            // Actor is no longer awaiting a code — clear the prompt if it was up.
+            // Functional updater avoids reading a stale `mfaRequired` from this
+            // poll closure (which captured the value at pull-start).
+            setMfaRequired(prev => (prev ? false : prev));
           }
           if (status.status === 'succeeded') {
             setCreditPullResult({

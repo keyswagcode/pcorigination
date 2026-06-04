@@ -36,6 +36,43 @@ export async function uploadDocument(
   return { documentId: data.id, filePath };
 }
 
+// Upload an app-generated document (e.g. a credit-consent PDF) straight to the
+// borrower's Documents folder. Unlike uploadDocument(), this doesn't require an
+// intake submission — it keys off the borrower, mirroring the credit-report
+// upload done by the pull-credit edge function.
+export async function uploadBorrowerDocument(
+  borrowerId: string,
+  blob: Blob,
+  fileName: string,
+  documentType: string,
+  documentSubtype?: string,
+): Promise<string> {
+  const filePath = `${borrowerId}/${documentType}/${fileName}`;
+
+  const { error: storageError } = await supabase.storage
+    .from('borrower-documents')
+    .upload(filePath, blob, { contentType: blob.type || 'application/pdf', upsert: false });
+  if (storageError) throw storageError;
+
+  const { data, error: dbError } = await supabase
+    .from('uploaded_documents')
+    .insert({
+      borrower_id: borrowerId,
+      file_path: filePath,
+      file_name: fileName,
+      file_size_bytes: blob.size,
+      mime_type: blob.type || 'application/pdf',
+      document_type: documentType,
+      document_subtype: documentSubtype || null,
+      processing_status: 'uploaded',
+    })
+    .select('id')
+    .single();
+  if (dbError) throw dbError;
+
+  return data.id;
+}
+
 export async function fetchDocumentsForApplication(submissionId: string): Promise<UploadedDocument[]> {
   const { data } = await supabase
     .from('uploaded_documents')

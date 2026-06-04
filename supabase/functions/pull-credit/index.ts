@@ -44,11 +44,20 @@ interface ApifyRun {
 
 async function startActorRun(input: Record<string, unknown>): Promise<ApifyRun> {
   if (!APIFY_ACTOR_ID) throw new Error('APIFY_ACTOR_ID not set')
-  const data = await apifyJson<{ data: ApifyRun }>(`/acts/${encodeURIComponent(APIFY_ACTOR_ID)}/runs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  })
+  // Headed Chromium (headless:false + xvfb) needs ~4GB or the platform OOM-kills
+  // the run, which surfaces to us as status=ABORTED with no OUTPUT.error — the
+  // exact symptom of the 2026-05-15 failure. Pin memory, give the run enough
+  // wall-clock for login + up-to-5-min MFA wait + order + payment + PDF, and
+  // always run the newest build so a fresh `apify push` takes effect.
+  const params = new URLSearchParams({ memory: '4096', timeout: '900', build: 'latest' })
+  const data = await apifyJson<{ data: ApifyRun }>(
+    `/acts/${encodeURIComponent(APIFY_ACTOR_ID)}/runs?${params.toString()}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  )
   return data.data
 }
 
