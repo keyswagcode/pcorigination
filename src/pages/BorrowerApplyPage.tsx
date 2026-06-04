@@ -5,6 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { ArrowRight, ArrowLeft, Eye, EyeOff, Building2, Shield } from 'lucide-react';
 import { sendNewApplicationAlert } from '../services/newAppAlertService';
 import { syncBorrowerToGhl } from '../services/ghlSyncService';
+import { creditConsentPdfToBlob } from '../lib/creditConsentGenerator';
+import { uploadBorrowerDocument } from '../services/documentService';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 
 type Step = 'credentials' | 'profile';
@@ -192,6 +194,7 @@ export function BorrowerApplyPage() {
       if (updateError) throw updateError;
 
       // Create borrower record
+      const consentedAt = creditConsent ? new Date().toISOString() : null;
       const { data: insertedBorrower, error: borrowerError } = await supabase.from('borrowers').insert({
         user_id: userId,
         borrower_name: `${firstName} ${lastName}`.trim(),
@@ -208,11 +211,36 @@ export function BorrowerApplyPage() {
         state_of_residence: addressState,
         broker_id: resolvedBrokerId,
         credit_consent: creditConsent,
-        credit_consent_at: creditConsent ? new Date().toISOString() : null,
+        credit_consent_at: consentedAt,
         borrower_status: 'draft',
         lifecycle_stage: 'profile_created',
       }).select('id').single();
       if (borrowerError) throw borrowerError;
+
+      // When the borrower granted credit consent, drop a signed-consent record
+      // PDF into their Documents folder for an auditable trail. Best-effort —
+      // never block profile creation on it.
+      if (insertedBorrower?.id && creditConsent && consentedAt) {
+        try {
+          const consentBlob = creditConsentPdfToBlob({
+            borrowerName: `${firstName} ${lastName}`.trim(),
+            email,
+            ssnLast4: ssnDigits.slice(-4),
+            address: `${addressStreet}, ${addressCity}, ${addressState} ${addressZip}`,
+            consentedAt,
+          });
+          const ts = consentedAt.replace(/[:.]/g, '-');
+          uploadBorrowerDocument(
+            insertedBorrower.id,
+            consentBlob,
+            `credit_consent_${ts}.pdf`,
+            'credit_consent',
+            'borrower_authorization',
+          ).catch(e => console.warn('Credit-consent PDF upload failed (non-fatal):', e));
+        } catch (e) {
+          console.warn('Credit-consent PDF generation failed (non-fatal):', e);
+        }
+      }
 
       // Send new application alert to broker + org owner + opted-in team members
       if (resolvedBrokerId) {
