@@ -7,6 +7,7 @@ import { BorrowerLayout } from './layouts/BorrowerLayout';
 import { InternalLayout } from './layouts/InternalLayout';
 import { BorrowerHomePage } from './pages/borrower/BorrowerHomePage';
 import { NewLoanPage } from './pages/borrower/NewLoanPage';
+import BorrowerCommercialIntakePage from './pages/borrower/BorrowerCommercialIntakePage';
 import { BorrowerQueuePage } from './pages/internal/BorrowerQueuePage';
 import { BorrowerFilePage } from './pages/internal/BorrowerFilePage';
 import { InternalPlacerBotPage } from './pages/internal/InternalPlacerBotPage';
@@ -162,6 +163,7 @@ function AppRoutes() {
           <Route path="loans" element={<BorrowerLoansPage />} />
           <Route path="loans/:loanId" element={<BorrowerLoanEditPage />} />
           <Route path="new-loan" element={<NewLoanPage />} />
+          <Route path="commercial-intake" element={<BorrowerCommercialIntakePage />} />
           <Route path="servicing" element={<BorrowerServicingPage />} />
           <Route path="servicing/:loanId" element={<BorrowerServicedLoanPage />} />
         </Route>
