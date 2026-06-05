@@ -154,6 +154,11 @@ export function runDSCREngine(profile: BorrowerProfile): DSCREngineResult {
     creditTier = findBestTier(creditScore, dscr);
     if (creditTier) {
       maxLtv = creditTier.max_ltv;
+      // Non-US citizens require 35% down — cap max LTV at 65% regardless of tier.
+      if (profile.borrower_flags.foreign_national && maxLtv > 65) {
+        maxLtv = 65;
+        passingCriteria.push('Non-U.S. citizen: max LTV capped at 65% (35% down required)');
+      }
       passingCriteria.push(`Qualifies for ${creditTier.tier} (${creditTier.risk} risk) with max LTV ${maxLtv}%`);
 
       if (profile.loan_request.ltv > maxLtv) {

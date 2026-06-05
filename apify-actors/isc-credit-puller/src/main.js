@@ -566,10 +566,12 @@ async function runPullCredit(input) {
           } catch { /* noop */ }
           const scores = await extractScores(reportPage).catch(() => ({ equifax: null, experian: null, transunion: null }));
           log.info(`Reused-report scores: ${JSON.stringify(scores)}`);
-          const pdfBuffer = await downloadCreditReportPdf(reportPage, reportId).catch(() => null);
+          const reuseOut = {};
+          const pdfBuffer = await downloadCreditReportPdf(reportPage, reportId, reuseOut).catch(() => null);
           return {
             ok: true, reusedExistingReport: true, existingReportId: reportId,
-            scores, pdfBuffer, finalUrl: reportPage.url(), capturedAt: new Date().toISOString(),
+            scores, monthly_debt: reuseOut.monthlyDebt ?? null,
+            pdfBuffer, finalUrl: reportPage.url(), capturedAt: new Date().toISOString(),
           };
         }
 
@@ -723,9 +725,10 @@ async function runPullCredit(input) {
     });
     log.info(`Scores: ${JSON.stringify(scores)}`);
 
-    // 7. Download the PDF
+    // 7. Download the PDF (and capture monthly debt from the report viewer)
     log.info('Downloading credit report PDF');
-    const pdfBuffer = await downloadCreditReportPdf(page).catch(async (err) => {
+    const out = {};
+    const pdfBuffer = await downloadCreditReportPdf(page, undefined, out).catch(async (err) => {
       await fail('download_pdf', err);
       return null;
     });
@@ -733,6 +736,7 @@ async function runPullCredit(input) {
     return {
       ok: true,
       scores,
+      monthly_debt: out.monthlyDebt ?? null,
       pdfBuffer,
       finalUrl: page.url(),
       capturedAt: new Date().toISOString(),
@@ -1093,6 +1097,34 @@ async function extractScores(page) {
   };
 }
 
+// Extract the borrower's TOTAL monthly debt payment from the report's TRADE
+// SUMMARY (the DTI numerator). The summary table is laid out as:
+//   - # BALANCE HIGH CREDIT PAYMENTS PAST DUE
+//   MORTGAGE  c  bal  hc  pmt  pd
+//   ...
+//   TOTAL     c  bal  hc  pmt  pd     <-- 4th number = total monthly PAYMENTS
+// Only present on the full report viewer (print_htm), not the order-info page.
+async function extractMonthlyDebt(page) {
+  try {
+    const text = await page.locator('body').innerText({ timeout: 5_000 });
+    const tsIdx = text.search(/TRADE\s*SUMMARY/i);
+    const scope = tsIdx >= 0 ? text.slice(tsIdx, tsIdx + 3000) : text;
+    // TOTAL row: count, balance, high-credit, PAYMENTS, past-due (5 numbers).
+    const m = scope.match(/\bTOTAL\b\s+\$?([\d,]+)\s+\$?([\d,]+)\s+\$?([\d,]+)\s+\$?([\d,]+)\s+\$?([\d,]+)/i);
+    if (m) {
+      const payments = parseInt(m[4].replace(/,/g, ''), 10);
+      if (Number.isFinite(payments)) {
+        log.info(`Monthly debt (TRADE SUMMARY total payments): ${payments}`);
+        return payments;
+      }
+    }
+    log.warning('Could not parse monthly debt from TRADE SUMMARY');
+  } catch (e) {
+    log.warning(`extractMonthlyDebt failed: ${e?.message || e}`);
+  }
+  return null;
+}
+
 // Run `trigger` while listening CONTEXT-WIDE for a PDF. ISC delivers report
 // PDFs by POSTing into a popup window; the PDF can arrive as the popup's
 // document, an embedded iframe, or a download — so we attach response +
@@ -1144,7 +1176,7 @@ async function capturePdfWhile(page, trigger) {
 // which exposes showPDF(). If we're not on it yet (e.g. the post-charge
 // ReportResult page), open the full report first via viewReport('Preq'), then
 // save. The PDF arrives via a popup/iframe/download, captured context-wide.
-async function downloadCreditReportPdf(page, orderId) {
+async function downloadCreditReportPdf(page, orderId, out = {}) {
   // Make sure we're on the report viewer (the page that has showPDF()).
   let viewer = page;
   let hasShow = await page.evaluate(() => typeof showPDF === 'function').catch(() => false);
@@ -1163,6 +1195,11 @@ async function downloadCreditReportPdf(page, orderId) {
       hasShow = await viewer.evaluate(() => typeof showPDF === 'function').catch(() => false);
     }
   }
+
+  // While we're on the full report viewer, extract the total monthly debt
+  // payment (DTI numerator) from the TRADE SUMMARY. Stashed on `out` so the
+  // caller can include it in OUTPUT without changing this function's return.
+  out.monthlyDebt = await extractMonthlyDebt(viewer).catch(() => null);
 
   // Save the full report: showPDF() (full multi-page report) preferred, with
   // viewPDFReport/printMe as fallbacks.

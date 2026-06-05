@@ -304,6 +304,7 @@ serve(async (req) => {
       const output = await outputRes.json() as {
         ok: boolean
         scores?: { equifax: number | null; experian: number | null; transunion: number | null }
+        monthly_debt?: number | null
         pdfKey?: string | null
         error?: string
       }
@@ -358,11 +359,20 @@ serve(async (req) => {
       const mid = midOfThree([output.scores?.equifax, output.scores?.experian, output.scores?.transunion])
       const { data: existingProfile } = await serviceClient
         .from('borrower_financial_profiles')
-        .select('summary')
+        .select('summary, monthly_income')
         .eq('borrower_id', borrower_id)
         .maybeSingle()
       const prevSummary = (existingProfile?.summary as Record<string, unknown> | null) || {}
-      await serviceClient.from('borrower_financial_profiles').upsert({
+
+      // Back-end DTI = total monthly debt (from this credit report) / monthly
+      // income (from bank statements, if already on file) * 100.
+      const monthlyDebt = typeof output.monthly_debt === 'number' ? output.monthly_debt : null
+      const monthlyIncome = Number((existingProfile as { monthly_income?: number } | null)?.monthly_income) || 0
+      const dti = (monthlyDebt != null && monthlyIncome > 0)
+        ? Math.round((monthlyDebt / monthlyIncome) * 1000) / 10
+        : null
+
+      const profileUpdate: Record<string, unknown> = {
         borrower_id,
         summary: {
           ...prevSummary,
@@ -374,10 +384,14 @@ serve(async (req) => {
             experian: output.scores?.experian ?? null,
             transunion: output.scores?.transunion ?? null,
             mid_score: mid,
+            monthly_debt: monthlyDebt,
             document_id: documentId,
           },
         },
-      }, { onConflict: 'borrower_id' })
+      }
+      if (monthlyDebt != null) profileUpdate.monthly_debt = monthlyDebt
+      if (dti != null) { profileUpdate.dti = dti; profileUpdate.dti_computed_at = new Date().toISOString() }
+      await serviceClient.from('borrower_financial_profiles').upsert(profileUpdate, { onConflict: 'borrower_id' })
 
       if (mid) {
         await serviceClient.from('borrowers').update({ credit_score: mid }).eq('id', borrower_id)
@@ -386,12 +400,16 @@ serve(async (req) => {
       await serviceClient.from('borrower_activity_log').insert({
         borrower_id, user_id: user.id, event_type: 'credit_pulled',
         title: 'Credit pulled from ISC',
-        details: `EQ ${output.scores?.equifax ?? '—'} · EX ${output.scores?.experian ?? '—'} · TU ${output.scores?.transunion ?? '—'} · mid ${mid ?? '—'}`,
+        details: `EQ ${output.scores?.equifax ?? '—'} · EX ${output.scores?.experian ?? '—'} · TU ${output.scores?.transunion ?? '—'} · mid ${mid ?? '—'}`
+          + (monthlyDebt != null ? ` · Debt $${monthlyDebt}/mo` : '')
+          + (dti != null ? ` · DTI ${dti}%` : ''),
       })
 
       return jsonRes({
         ok: true,
         status: 'succeeded',
+        monthly_debt: monthlyDebt,
+        dti,
         equifax: output.scores?.equifax ?? null,
         experian: output.scores?.experian ?? null,
         transunion: output.scores?.transunion ?? null,

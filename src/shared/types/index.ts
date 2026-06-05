@@ -149,6 +149,10 @@ export interface BorrowerFinancialProfile {
   liquidity_estimate: number | null;
   income_estimate: number | null;
   cash_flow_estimate: number | null;
+  monthly_debt: number | null;
+  dti: number | null;
+  income_method: string | null;
+  income_months: number | null;
   confidence_score: number | null;
   summary: Record<string, unknown> | null;
   created_at: string;

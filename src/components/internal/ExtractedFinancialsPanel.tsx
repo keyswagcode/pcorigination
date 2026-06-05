@@ -134,6 +134,19 @@ export function ExtractedFinancialsPanel({ financialProfile, borrowerId }: Extra
             {formatCurrency(financialProfile?.cash_flow_estimate)}
           </p>
         </div>
+
+        <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl p-4 border border-amber-200">
+          <div className="flex items-center gap-2 mb-2">
+            <TrendingDown className="w-4 h-4 text-amber-600" />
+            <span className="text-xs font-medium text-amber-700">Debt-to-Income</span>
+          </div>
+          <p className="text-xl font-bold text-amber-800">
+            {financialProfile?.dti != null ? `${financialProfile.dti}%` : '—'}
+          </p>
+          {financialProfile?.monthly_debt != null && (
+            <p className="text-[11px] text-amber-600 mt-1">{formatCurrency(financialProfile.monthly_debt)}/mo debt</p>
+          )}
+        </div>
       </div>
 
       {financialProfile && (
@@ -151,9 +164,21 @@ export function ExtractedFinancialsPanel({ financialProfile, borrowerId }: Extra
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
               <div className="flex justify-between py-2 border-b border-gray-100">
-                <span className="text-gray-500">Monthly Income</span>
+                <span className="text-gray-500">Monthly Income{financialProfile.income_months ? ` (${financialProfile.income_months}mo bank stmts)` : ''}</span>
                 <span className="font-medium text-gray-900">
                   {formatCurrency(financialProfile.monthly_income)}
+                </span>
+              </div>
+              <div className="flex justify-between py-2 border-b border-gray-100">
+                <span className="text-gray-500">Monthly Debt</span>
+                <span className="font-medium text-gray-900">
+                  {formatCurrency(financialProfile.monthly_debt)}
+                </span>
+              </div>
+              <div className="flex justify-between py-2 border-b border-gray-100">
+                <span className="text-gray-500">Debt-to-Income (DTI)</span>
+                <span className="font-medium text-gray-900">
+                  {financialProfile.dti != null ? `${financialProfile.dti}%` : '—'}
                 </span>
               </div>
               <div className="flex justify-between py-2 border-b border-gray-100">
