@@ -1,4 +1,8 @@
 import jsPDF from 'jspdf';
+import {
+  DECLARATIONS_5A, DECLARATIONS_5B, PRIOR_PROPERTY_TYPE_OPTIONS, PRIOR_TITLE_OPTIONS,
+  type Urla1003Declarations, type Urla1003Military, type Urla1003Demographic,
+} from '../shared/urla1003Details';
 
 // ============================================
 // Uniform Residential Loan Application (URLA / Form 1003)
@@ -31,6 +35,9 @@ export interface URLA1003BorrowerInput {
   previousAddresses?: URLA1003PreviousAddress[];
   isFirstTimeInvestor?: boolean;
   isForeignNational?: boolean;
+  declarations?: Urla1003Declarations | null;
+  military?: Urla1003Military | null;
+  demographic?: Urla1003Demographic | null;
 }
 
 export interface URLA1003PreviousAddress {
@@ -536,40 +543,33 @@ export async function generateURLA1003Pdf(opts: URLA1003Options): Promise<void> 
   // ==========================================================
   newPage(opts.primary.borrowerName);
   sectionHeader('Section 5: Declarations', opts.primary.borrowerName);
+  const decl = opts.primary.declarations || null;
+  const declCheck = (key: keyof Urla1003Declarations) => {
+    const v = decl ? (decl[key] as 'yes' | 'no' | null) : null;
+    return [
+      { label: 'Yes', checked: v === 'yes' },
+      { label: 'No', checked: v === 'no' },
+    ];
+  };
+
   subsection('5a. About this Property and Your Money for this Loan', opts.primary.borrowerName);
-  const declarations5a = [
-    'A. Will you occupy the property as your primary residence?',
-    'B. Have you had an ownership interest in another property in the last three years?',
-    'C. If yes to B, what type of property (Primary, Secondary, Investment)?',
-    'D. How did you hold title to that property (Sole, Joint with Spouse, Joint with Other)?',
-    'E. Are you borrowing any money for this transaction (other than the loan)?',
-    'F. Have you or will you be applying for a mortgage loan on another property before this loan closes?',
-    'G. Have you or will you be applying for any new credit (e.g., installment loan, credit card) before this loan closes?',
-    'H. Will this property be subject to a lien that could take priority over the first mortgage?',
-  ];
-  for (const q of declarations5a) {
-    checkboxRow(q, [
-      { label: 'Yes', checked: false },
-      { label: 'No', checked: false },
-    ], opts.primary.borrowerName);
+  for (const q of DECLARATIONS_5A) {
+    checkboxRow(q.label, declCheck(q.key), opts.primary.borrowerName);
+    // Show the B follow-ups (C/D) right after the ownership question.
+    if (q.key === 'ownedLast3Yrs' && decl?.ownedLast3Yrs === 'yes') {
+      fieldRow([
+        { label: 'C. Type of property', value: PRIOR_PROPERTY_TYPE_OPTIONS.find(o => o.value === decl.priorPropertyType)?.label || BLANK, weight: 3 },
+        { label: 'D. How title was held', value: PRIOR_TITLE_OPTIONS.find(o => o.value === decl.priorTitleHeld)?.label || BLANK, weight: 3 },
+      ], opts.primary.borrowerName);
+    }
   }
 
   subsection('5b. About Your Finances', opts.primary.borrowerName);
-  const declarations5b = [
-    'I. Are you a co-signer or guarantor on any debt or loan that is not disclosed on this application?',
-    'J. Are there any outstanding judgments against you?',
-    'K. Are you currently delinquent or in default on a Federal debt?',
-    'L. Are you a party to a lawsuit in which you potentially have any personal financial liability?',
-    'M. Have you conveyed title to any property in lieu of foreclosure in the past 7 years?',
-    'N. Have you completed a pre-foreclosure sale or short sale in the past 7 years?',
-    'O. Have you had property foreclosed upon in the past 7 years?',
-    'P. Have you declared bankruptcy in the past 7 years?',
-  ];
-  for (const q of declarations5b) {
-    checkboxRow(q, [
-      { label: 'Yes', checked: false },
-      { label: 'No', checked: false },
-    ], opts.primary.borrowerName);
+  for (const q of DECLARATIONS_5B) {
+    checkboxRow(q.label, declCheck(q.key), opts.primary.borrowerName);
+    if (q.key === 'bankruptcy' && decl?.bankruptcy === 'yes' && decl.bankruptcyTypes?.length) {
+      fieldRow([{ label: 'Bankruptcy type(s)', value: decl.bankruptcyTypes.join(', '), weight: 4 }], opts.primary.borrowerName);
+    }
   }
 
   sectionHeader('Section 6: Acknowledgments and Agreements', opts.primary.borrowerName);
@@ -607,6 +607,39 @@ export async function generateURLA1003Pdf(opts: URLA1003Options): Promise<void> 
     newPage(co.borrowerName);
     renderBorrowerSection1(co, `Additional Borrower ${i + 1}: Section 1`);
   }
+
+  // ==========================================================
+  // Section 7 — Military Service
+  // ==========================================================
+  newPage(opts.primary.borrowerName);
+  const mil = opts.primary.military || null;
+  sectionHeader('Section 7: Military Service of the Borrower', opts.primary.borrowerName);
+  checkboxRow('Did you (or your deceased spouse) ever serve, or are you currently serving, in the U.S. Armed Forces?', [
+    { label: 'Yes', checked: mil?.servedOrServing === 'yes' },
+    { label: 'No', checked: mil?.servedOrServing === 'no' },
+  ], opts.primary.borrowerName);
+  if (mil?.servedOrServing === 'yes') {
+    checkboxRow('If Yes, check all that apply', [
+      { label: 'Active Duty', checked: !!mil.currentlyActiveDuty },
+      { label: 'Retired / Discharged / Separated', checked: !!mil.retiredDischargedSeparated },
+      { label: 'Non-activated Reserve / National Guard', checked: !!mil.nonActivatedReserveGuard },
+      { label: 'Surviving Spouse', checked: !!mil.survivingSpouse },
+    ], opts.primary.borrowerName);
+  }
+
+  // ==========================================================
+  // Section 8 — Demographic Information (HMDA)
+  // ==========================================================
+  const demo = opts.primary.demographic || null;
+  sectionHeader('Section 8: Demographic Information of the Borrower', opts.primary.borrowerName);
+  note('This information is collected to monitor compliance with federal fair-lending laws. Providing it is optional.', opts.primary.borrowerName);
+  fieldRow([
+    { label: 'Ethnicity', value: demo?.ethnicityDoNotWish ? 'Did not wish to provide' : (demo?.ethnicity?.length ? demo.ethnicity.join(', ') : BLANK), weight: 3 },
+    { label: 'Sex', value: demo?.sexDoNotWish ? 'Did not wish to provide' : (demo?.sex || BLANK), weight: 2 },
+  ], opts.primary.borrowerName);
+  fieldRow([
+    { label: 'Race', value: demo?.raceDoNotWish ? 'Did not wish to provide' : (demo?.race?.length ? demo.race.join(', ') : BLANK), weight: 5 },
+  ], opts.primary.borrowerName);
 
   // ==========================================================
   // FINAL PAGE — Loan Originator Information (Section 9)

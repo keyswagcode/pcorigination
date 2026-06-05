@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { createLinkToken, notifyLinkSuccess, getReportStatus } from '../../services/plaidService';
 import { generatePreApprovalPdf, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
+import { Urla1003DetailsForm } from '../../components/borrower/Urla1003DetailsForm';
 import {
   Building2, CheckCircle2, DollarSign, Plus, Download,
   Shield, Banknote, FileText, ArrowRight, Loader2, AlertCircle
@@ -46,6 +47,7 @@ export function BorrowerHomePage() {
   const [borrower, setBorrower] = useState<BorrowerData | null>(null);
   const [financialProfile, setFinancialProfile] = useState<FinancialProfile | null>(null);
   const [preApprovals, setPreApprovals] = useState<PreApprovalData[]>([]);
+  const [showCompleteApp, setShowCompleteApp] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [plaidLoading, setPlaidLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
@@ -802,6 +804,37 @@ export function BorrowerHomePage() {
           </div>
         </div>
       </div>
+
+      {/* Step 3 — Complete Application (the rest of the Form 1003). Optional and
+          only after pre-approval; never required to create an account or get
+          pre-approved. */}
+      {hasPreApproval && (
+        <div className="mt-6 border border-gray-200 rounded-xl bg-white overflow-hidden">
+          <div className="px-6 py-5 flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Complete Your Application</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                You're pre-approved! When you're ready, finish the rest of your loan application (Form 1003) —
+                declarations, military service, and demographic information.
+              </p>
+            </div>
+            {!showCompleteApp && (
+              <button
+                onClick={() => setShowCompleteApp(true)}
+                className="shrink-0 flex items-center gap-2 px-5 py-2.5 bg-teal-600 text-white font-medium rounded-lg hover:bg-teal-700 transition-colors group"
+              >
+                Complete Application
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            )}
+          </div>
+          {showCompleteApp && (
+            <div className="px-6 py-5 border-t border-gray-100">
+              <Urla1003DetailsForm borrowerId={borrower.id} onSaved={() => loadData()} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

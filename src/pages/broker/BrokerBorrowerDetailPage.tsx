@@ -9,7 +9,8 @@ import {
 } from 'lucide-react';
 import { generatePreApprovalPdf } from '../../lib/pdfGenerator';
 import { generateStatementsPdf } from '../../lib/statementPdfGenerator';
-import { generateURLA1003Pdf } from '../../lib/urla1003Generator';
+import { generateURLA1003Pdf, type URLA1003BorrowerInput } from '../../lib/urla1003Generator';
+import { Urla1003DetailsForm } from '../../components/borrower/Urla1003DetailsForm';
 import { generateURLA1003MismoXml } from '../../lib/urla1003MismoGenerator';
 import { estimateAnnualIncome } from '../../lib/incomeEstimator';
 import { startCreditPull, pollCreditPull, saveCardMetadata, forgetSavedCard, submitMfaCode } from '../../services/iscCreditService';
@@ -121,7 +122,7 @@ interface CoBorrower {
   created_at: string;
 }
 
-type Tab = 'profile' | 'documents' | 'preapprovals' | 'loans' | 'notes' | 'audit';
+type Tab = 'profile' | 'documents' | 'preapprovals' | 'loans' | 'urla' | 'notes' | 'audit';
 
 const LOAN_TYPE_LABELS: Record<string, string> = { dscr: 'DSCR', fix_flip: 'Fix & Flip', bridge: 'Bridge' };
 const STATUS_COLORS: Record<string, string> = {
@@ -827,7 +828,10 @@ export function BrokerBorrowerDetailPage() {
           monthlyHousingExpense: p.monthly_housing_expense,
         })),
         isFirstTimeInvestor: false,
-        isForeignNational: false,
+        isForeignNational: 'foreign_national' in b ? !!b.foreign_national : false,
+        declarations: 'declarations' in b ? (b.declarations as URLA1003BorrowerInput['declarations']) ?? null : null,
+        military: 'military_service' in b ? (b.military_service as URLA1003BorrowerInput['military']) ?? null : null,
+        demographic: 'demographic_info' in b ? (b.demographic_info as URLA1003BorrowerInput['demographic']) ?? null : null,
       });
 
       const generatorOpts = {
@@ -904,6 +908,7 @@ export function BrokerBorrowerDetailPage() {
     { key: 'documents', label: 'Documents', icon: FileText, count: documents.length },
     { key: 'preapprovals', label: 'Pre-Approvals', icon: DollarSign, count: preApprovals.length },
     { key: 'loans', label: 'Loans', icon: Briefcase, count: loans.length },
+    { key: 'urla', label: '1003 Details', icon: FileText },
     { key: 'notes', label: 'Notes & Activity', icon: MessageSquare, count: notes.length },
     { key: 'audit', label: 'Audit Trail', icon: FileText, count: auditTrail.length },
   ];
@@ -1664,6 +1669,16 @@ export function BrokerBorrowerDetailPage() {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {activeTab === 'urla' && (
+        <div className="bg-white border border-gray-200 rounded-xl p-6 max-w-3xl">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">1003 Details</h2>
+            <p className="text-sm text-gray-500">Declarations, military service, and demographic (HMDA) information for the URLA / Form 1003.</p>
+          </div>
+          <Urla1003DetailsForm borrowerId={borrower.id} />
         </div>
       )}
 
