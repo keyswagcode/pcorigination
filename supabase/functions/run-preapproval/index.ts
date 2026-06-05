@@ -119,6 +119,18 @@ function evaluateProgram(pkg: LoanPackage, program: LenderProgram): {
   const loanAmount = pkg.loan_terms.requested_amount;
   let score = 50;
 
+  // Non-US-citizen overlay: regardless of the lender program's own limits,
+  // non-US citizens require 35% down (max 65% LTV) on every loan type and a
+  // $100k minimum loan amount. We tighten the program's max LTV / min loan
+  // accordingly before the checks below.
+  const isForeignNational = pkg.borrower_profile.is_foreign_national;
+  const effectiveMaxLtv = isForeignNational
+    ? Math.min(program.max_ltv ?? 65, 65)
+    : program.max_ltv;
+  const effectiveMinLoan = isForeignNational
+    ? Math.max(program.min_loan_amount ?? 0, 100000)
+    : program.min_loan_amount;
+
   if (program.min_credit_score != null) {
     if (credit == null) {
       hardStops.push(`Credit score not provided`);
@@ -163,43 +175,46 @@ function evaluateProgram(pkg: LoanPackage, program: LenderProgram): {
     }
   }
 
-  if (program.max_ltv != null) {
+  if (effectiveMaxLtv != null) {
     const ltvPct = ltv > 1 ? ltv : ltv * 100;
-    const maxPct = program.max_ltv > 1 ? program.max_ltv : program.max_ltv * 100;
+    const maxPct = effectiveMaxLtv > 1 ? effectiveMaxLtv : effectiveMaxLtv * 100;
+    const ltvCapNote = isForeignNational && maxPct <= 65 ? ' (non-U.S. citizen: 35% down required)' : '';
     if (ltvPct <= maxPct) {
-      passing.push(`LTV ${ltvPct.toFixed(1)}% within maximum ${maxPct.toFixed(1)}%`);
+      passing.push(`LTV ${ltvPct.toFixed(1)}% within maximum ${maxPct.toFixed(1)}%${ltvCapNote}`);
       score += 10;
     } else if (ltvPct <= maxPct + 3) {
-      nearMisses.push(`LTV ${ltvPct.toFixed(1)}% is near maximum ${maxPct.toFixed(1)}%`);
+      nearMisses.push(`LTV ${ltvPct.toFixed(1)}% is near maximum ${maxPct.toFixed(1)}%${ltvCapNote}`);
       salvageSuggestions.push({
         field: 'LTV',
         current_value: `${ltvPct.toFixed(1)}%`,
         required_value: `${maxPct.toFixed(1)}%`,
-        fix: 'Increase down payment or reduce loan amount'
+        fix: isForeignNational ? 'Non-U.S. citizens require 35% down (max 65% LTV) — increase down payment' : 'Increase down payment or reduce loan amount'
       });
       score += 2;
     } else {
-      hardStops.push(`LTV ${ltvPct.toFixed(1)}% exceeds maximum ${maxPct.toFixed(1)}%`);
+      hardStops.push(`LTV ${ltvPct.toFixed(1)}% exceeds maximum ${maxPct.toFixed(1)}%${ltvCapNote}`);
       score -= 15;
     }
   }
 
-  if (program.min_loan_amount != null) {
-    if (loanAmount >= program.min_loan_amount) {
-      passing.push(`Loan amount $${loanAmount.toLocaleString()} meets minimum $${program.min_loan_amount.toLocaleString()}`);
+  if (effectiveMinLoan != null) {
+    const minNote = isForeignNational && effectiveMinLoan >= 100000 && (program.min_loan_amount ?? 0) < 100000
+      ? ' (non-U.S. citizen minimum)' : '';
+    if (loanAmount >= effectiveMinLoan) {
+      passing.push(`Loan amount $${loanAmount.toLocaleString()} meets minimum $${effectiveMinLoan.toLocaleString()}${minNote}`);
       score += 8;
-    } else if (isNearLoanMinimum(loanAmount, program.min_loan_amount)) {
-      const shortfall = program.min_loan_amount - loanAmount;
-      nearMisses.push(`Loan amount $${loanAmount.toLocaleString()} is slightly below minimum $${program.min_loan_amount.toLocaleString()}`);
+    } else if (isNearLoanMinimum(loanAmount, effectiveMinLoan)) {
+      const shortfall = effectiveMinLoan - loanAmount;
+      nearMisses.push(`Loan amount $${loanAmount.toLocaleString()} is slightly below minimum $${effectiveMinLoan.toLocaleString()}${minNote}`);
       salvageSuggestions.push({
         field: 'Loan Amount',
         current_value: `$${loanAmount.toLocaleString()}`,
-        required_value: `$${program.min_loan_amount.toLocaleString()}`,
+        required_value: `$${effectiveMinLoan.toLocaleString()}`,
         fix: `Increase loan amount by $${shortfall.toLocaleString()} to meet minimum`
       });
       score += 3;
     } else {
-      hardStops.push(`Loan amount $${loanAmount.toLocaleString()} below minimum $${program.min_loan_amount.toLocaleString()}`);
+      hardStops.push(`Loan amount $${loanAmount.toLocaleString()} below minimum $${effectiveMinLoan.toLocaleString()}${minNote}`);
       score -= 12;
     }
   }

@@ -57,6 +57,8 @@ export interface CreditPullStatus {
   experian?: number | null;
   transunion?: number | null;
   mid_score?: number | null;
+  monthly_debt?: number | null;
+  dti?: number | null;
   document_id?: string | null;
 }
 
