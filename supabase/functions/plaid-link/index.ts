@@ -18,6 +18,59 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// ---- Qualifying income from the Plaid CRA base report ----
+// Mirrors src/lib/incomeEstimator.ts: count income inflows on depository
+// accounts, excluding transfers, refunds, credit-card/loan payments, and fees.
+// Monthly income = total qualifying inflows / months actually covered.
+const INCOME_PRIMARY = new Set(['INCOME'])
+const INCOME_LEGACY = new Set(['payroll', 'wages', 'salary', 'interest', 'dividends', 'retirement', 'pension'])
+const EXCLUDE_PRIMARY = new Set(['TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS', 'BANK_FEES'])
+const EXCLUDE_LEGACY = new Set(['transfer', 'credit', 'refund', 'reimbursement', 'cash advance', 'payment', 'fee', 'atm'])
+
+function isIncomeTx(tx: Record<string, unknown>): boolean {
+  const amount = Number(tx?.amount) || 0
+  if (amount <= 0) return false // depository inflows are positive in CRA reports
+  const pfc = tx?.personal_finance_category as { primary?: string } | null | undefined
+  if (pfc?.primary) {
+    if (EXCLUDE_PRIMARY.has(pfc.primary)) return false
+    return INCOME_PRIMARY.has(pfc.primary)
+  }
+  const cats = ((tx?.category as string[] | null) || []).map((c) => String(c).toLowerCase())
+  if (cats.length === 0) return false
+  if (cats.some((c) => EXCLUDE_LEGACY.has(c))) return false
+  return cats.some((c) => INCOME_LEGACY.has(c))
+}
+
+function computeQualifyingIncome(report: Record<string, unknown> | null | undefined): {
+  monthlyIncome: number; annualIncome: number; monthsCovered: number
+} {
+  const items = (report?.items || []) as Array<Record<string, unknown>>
+  let total = 0
+  let earliest: number | null = null
+  let latest: number | null = null
+  for (const item of items) {
+    for (const acct of (item.accounts || []) as Array<Record<string, unknown>>) {
+      if (acct.type !== 'depository') continue
+      for (const tx of (acct.transactions || []) as Array<Record<string, unknown>>) {
+        const dateStr = tx?.date as string | undefined
+        if (!dateStr) continue
+        const t = new Date(dateStr).getTime()
+        if (isNaN(t)) continue
+        if (!isIncomeTx(tx)) continue
+        total += Math.abs(Number(tx.amount) || 0)
+        if (earliest === null || t < earliest) earliest = t
+        if (latest === null || t > latest) latest = t
+      }
+    }
+  }
+  if (total <= 0 || earliest === null || latest === null) {
+    return { monthlyIncome: 0, annualIncome: 0, monthsCovered: 0 }
+  }
+  const monthsCovered = Math.max(1, Math.round(((latest - earliest) / (1000 * 60 * 60 * 24 * 30.44)) * 10) / 10)
+  const monthlyIncome = Math.round(total / monthsCovered)
+  return { monthlyIncome, annualIncome: monthlyIncome * 12, monthsCovered }
+}
+
 async function plaidRequest(endpoint: string, body: Record<string, unknown>) {
   const res = await fetch(`${PLAID_BASE_URL}${endpoint}`, {
     method: 'POST',
@@ -245,6 +298,21 @@ serve(async (req) => {
             }
           }
 
+          // Qualifying monthly income from the CRA transactions (drives DTI).
+          const income = computeQualifyingIncome(report)
+
+          // If a credit pull already recorded monthly debt, recompute back-end
+          // DTI now that we have income.
+          const { data: existingProf } = await serviceClient
+            .from('borrower_financial_profiles')
+            .select('monthly_debt')
+            .eq('borrower_id', borrower.id)
+            .maybeSingle()
+          const monthlyDebt = Number((existingProf as { monthly_debt?: number } | null)?.monthly_debt) || 0
+          const dti = (income.monthlyIncome > 0 && monthlyDebt > 0)
+            ? Math.round((monthlyDebt / income.monthlyIncome) * 1000) / 10
+            : null
+
           // Step 1: persist the report + flip status to ready FIRST. Do this
           // before anything else so a downstream pre_approvals insert failure
           // can never strand the borrower in 'pending' forever.
@@ -252,11 +320,18 @@ serve(async (req) => {
             borrower_id: borrower.id,
             liquidity_estimate: totalLiquidity,
             ending_balance_avg: totalLiquidity,
+            monthly_income: income.monthlyIncome,
+            income_estimate: income.annualIncome,
+            income_method: 'plaid_cra_qualifying',
+            income_months: income.monthsCovered,
+            ...(dti != null ? { dti, dti_computed_at: new Date().toISOString() } : {}),
             confidence_score: 95,
             summary: {
               source: 'plaid_cra_base_report',
               verified_at: new Date().toISOString(),
               total_liquidity: totalLiquidity,
+              monthly_income: income.monthlyIncome,
+              income_months: income.monthsCovered,
               report,
             },
           }, { onConflict: 'borrower_id' })
