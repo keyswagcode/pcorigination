@@ -2,6 +2,8 @@ import jsPDF from 'jspdf';
 import {
   DECLARATIONS_5A, DECLARATIONS_5B, PRIOR_PROPERTY_TYPE_OPTIONS, PRIOR_TITLE_OPTIONS,
   type Urla1003Declarations, type Urla1003Military, type Urla1003Demographic,
+  type Urla1003Employment, type Urla1003OtherIncome, type Urla1003Asset,
+  type Urla1003Liability, type Urla1003RealEstate,
 } from '../shared/urla1003Details';
 
 // ============================================
@@ -38,6 +40,11 @@ export interface URLA1003BorrowerInput {
   declarations?: Urla1003Declarations | null;
   military?: Urla1003Military | null;
   demographic?: Urla1003Demographic | null;
+  employment?: Urla1003Employment[] | null;
+  otherIncome?: Urla1003OtherIncome[] | null;
+  assets?: Urla1003Asset[] | null;
+  liabilities?: Urla1003Liability[] | null;
+  realEstate?: Urla1003RealEstate[] | null;
 }
 
 export interface URLA1003PreviousAddress {
@@ -353,56 +360,69 @@ export async function generateURLA1003Pdf(opts: URLA1003Options): Promise<void> 
       }
     }
 
-    // 1b. Current Employment/Self-Employment and Income
+    // 1b/1c/1d. Employment / Self-Employment and Income (from collected list)
+    const employmentList = b.employment || [];
+    const renderEmployment = (e: Urla1003Employment) => {
+      fieldRow([
+        { label: 'Employer or Business Name', value: val(e.employerName), weight: 3 },
+        { label: 'Phone', value: val(e.phone), weight: 2 },
+      ], b.borrowerName);
+      fieldRow([
+        { label: 'Street', value: val(e.street), weight: 3 },
+        { label: 'City', value: val(e.city), weight: 2 },
+        { label: 'State', value: val(e.state), weight: 1 },
+        { label: 'ZIP', value: val(e.zip), weight: 1 },
+      ], b.borrowerName);
+      fieldRow([
+        { label: 'Position or Title', value: val(e.position), weight: 3 },
+        { label: 'Start Date', value: val(e.startDate), weight: 2 },
+        { label: 'Yrs in line of work', value: val(e.yearsInLineOfWork), weight: 2 },
+      ], b.borrowerName);
+      checkboxRow('Self-Employed?', [
+        { label: 'Yes', checked: !!e.selfEmployed },
+        { label: 'No', checked: !e.selfEmployed },
+        { label: 'Owner ≥ 25%', checked: !!e.ownership25OrMore },
+      ], b.borrowerName);
+      const total = (e.monthlyBase || 0) + (e.monthlyOvertime || 0) + (e.monthlyBonus || 0) + (e.monthlyCommission || 0) + (e.monthlyOther || 0);
+      fieldRow([
+        { label: 'Base', value: fmtCurrency(e.monthlyBase ?? null), weight: 2 },
+        { label: 'Overtime', value: fmtCurrency(e.monthlyOvertime ?? 0), weight: 1 },
+        { label: 'Bonus', value: fmtCurrency(e.monthlyBonus ?? 0), weight: 1 },
+        { label: 'Commission', value: fmtCurrency(e.monthlyCommission ?? 0), weight: 1 },
+        { label: 'Other', value: fmtCurrency(e.monthlyOther ?? 0), weight: 1 },
+        { label: 'TOTAL', value: fmtCurrency(total || (e.monthlyBase ?? null)), weight: 2 },
+      ], b.borrowerName);
+    };
+
     subsection('1b. Current Employment / Self-Employment and Income', b.borrowerName);
-    fieldRow([
-      { label: 'Employer or Business Name', value: BLANK, weight: 3 },
-      { label: 'Phone', value: BLANK, weight: 2 },
-    ], b.borrowerName);
-    fieldRow([
-      { label: 'Street', value: BLANK, weight: 4 },
-      { label: 'Unit #', value: BLANK_SHORT, weight: 1 },
-    ], b.borrowerName);
-    fieldRow([
-      { label: 'City', value: BLANK, weight: 3 },
-      { label: 'State', value: BLANK_SHORT, weight: 1 },
-      { label: 'ZIP', value: BLANK_SHORT, weight: 1 },
-      { label: 'Country', value: 'USA', weight: 1 },
-    ], b.borrowerName);
-    fieldRow([
-      { label: 'Position or Title', value: BLANK, weight: 3 },
-      { label: 'Start Date', value: BLANK, weight: 2 },
-      { label: 'How long in line of work? (years)', value: BLANK_SHORT, weight: 2 },
-    ], b.borrowerName);
-    checkboxRow('Self-Employed?', [
-      { label: 'Yes', checked: false },
-      { label: 'No', checked: false },
-      { label: 'Owner ≥ 25%', checked: false },
-    ], b.borrowerName);
-    fieldRow([
-      { label: 'Gross Monthly Income — Base', value: fmtCurrency(b.monthlyIncome), weight: 2 },
-      { label: 'Overtime', value: '$0', weight: 1 },
-      { label: 'Bonus', value: '$0', weight: 1 },
-      { label: 'Commission', value: '$0', weight: 1 },
-      { label: 'Other', value: '$0', weight: 1 },
-      { label: 'TOTAL', value: fmtCurrency(b.monthlyIncome), weight: 2 },
-    ], b.borrowerName);
+    const currentEmp = employmentList.filter(e => e.kind === 'current');
+    if (currentEmp.length) currentEmp.forEach(renderEmployment);
+    else {
+      // fall back to the income figure we computed from bank statements/Plaid
+      fieldRow([{ label: 'Gross Monthly Income (from verified deposits)', value: fmtCurrency(b.monthlyIncome), weight: 3 }], b.borrowerName);
+    }
 
-    // 1c. Additional Employment
-    subsection('1c. IF APPLICABLE, Complete Information for Additional Employment / Self-Employment', b.borrowerName);
-    note('Does not apply.', b.borrowerName);
+    subsection('1c. Additional Employment / Self-Employment', b.borrowerName);
+    const addlEmp = employmentList.filter(e => e.kind === 'additional');
+    if (addlEmp.length) addlEmp.forEach(renderEmployment); else note('Does not apply.', b.borrowerName);
 
-    // 1d. Previous Employment
-    subsection('1d. IF APPLICABLE, Complete Information for Previous Employment', b.borrowerName);
-    note('Required only if current employment is less than 2 years.', b.borrowerName);
+    subsection('1d. Previous Employment / Self-Employment', b.borrowerName);
+    const prevEmp = employmentList.filter(e => e.kind === 'previous');
+    if (prevEmp.length) prevEmp.forEach(renderEmployment); else note('Required only if current employment is less than 2 years.', b.borrowerName);
 
     // 1e. Income from Other Sources
     subsection('1e. Income from Other Sources', b.borrowerName);
-    note('Examples: alimony, child support, social security, retirement, rental income, capital gains, etc. Auto-fill not available.', b.borrowerName);
-    fieldRow([
-      { label: 'Income Source', value: BLANK, weight: 3 },
-      { label: 'Monthly Income', value: BLANK, weight: 2 },
-    ], b.borrowerName);
+    const otherInc = b.otherIncome || [];
+    if (otherInc.length) {
+      for (const o of otherInc) {
+        fieldRow([
+          { label: 'Income Source', value: val(o.source), weight: 3 },
+          { label: 'Monthly Income', value: fmtCurrency(o.monthlyAmount ?? null), weight: 2 },
+        ], b.borrowerName);
+      }
+    } else {
+      note('Examples: alimony, child support, social security, retirement, rental income, etc.', b.borrowerName);
+    }
 
     // Notable signals from the file
     if (b.creditScore || b.liquidity || b.entityType) {
@@ -428,40 +448,38 @@ export async function generateURLA1003Pdf(opts: URLA1003Options): Promise<void> 
   sectionHeader('Section 2: Financial Information — Assets and Liabilities', opts.primary.borrowerName);
 
   subsection('2a. Assets — Bank Accounts, Retirement, and Other Accounts You Have', opts.primary.borrowerName);
+  const assetList = opts.primary.assets || [];
+  // Always show the verified-liquidity line, then any itemized assets.
   fieldRow([
-    { label: 'Account Type', value: 'Checking / Savings (verified via bank statements)', weight: 3 },
+    { label: 'Account Type', value: 'Verified liquid assets (bank statements / Plaid)', weight: 3 },
     { label: 'Financial Institution', value: BLANK, weight: 3 },
     { label: 'Account Number', value: BLANK, weight: 2 },
     { label: 'Cash or Market Value', value: fmtCurrency(opts.primary.liquidity), weight: 2 },
   ], opts.primary.borrowerName);
-  fieldRow([
-    { label: 'Account Type', value: BLANK, weight: 3 },
-    { label: 'Financial Institution', value: BLANK, weight: 3 },
-    { label: 'Account Number', value: BLANK, weight: 2 },
-    { label: 'Cash or Market Value', value: BLANK, weight: 2 },
-  ], opts.primary.borrowerName);
-
-  subsection('2b. Other Assets You Have', opts.primary.borrowerName);
-  fieldRow([
-    { label: 'Asset Type', value: BLANK, weight: 3 },
-    { label: 'Cash or Market Value', value: BLANK, weight: 2 },
-  ], opts.primary.borrowerName);
+  for (const a of assetList) {
+    fieldRow([
+      { label: 'Account Type', value: val(a.accountType), weight: 3 },
+      { label: 'Financial Institution', value: val(a.institution), weight: 3 },
+      { label: 'Account Number', value: val(a.accountNumber), weight: 2 },
+      { label: 'Cash or Market Value', value: fmtCurrency(a.value ?? null), weight: 2 },
+    ], opts.primary.borrowerName);
+  }
 
   subsection('2c. Liabilities — Credit Cards, Other Debts, and Leases that You Owe', opts.primary.borrowerName);
-  note('Pull from credit report. Auto-fill not available.', opts.primary.borrowerName);
-  fieldRow([
-    { label: 'Account Type (Revolving/Installment/Lease/Other)', value: BLANK, weight: 3 },
-    { label: 'Company Name', value: BLANK, weight: 3 },
-    { label: 'Account Number', value: BLANK, weight: 2 },
-    { label: 'Unpaid Balance', value: BLANK, weight: 2 },
-    { label: 'Monthly Payment', value: BLANK, weight: 2 },
-  ], opts.primary.borrowerName);
-
-  subsection('2d. Other Liabilities and Expenses', opts.primary.borrowerName);
-  fieldRow([
-    { label: 'Type (Alimony, Child Support, Job-Related Expenses, etc.)', value: BLANK, weight: 3 },
-    { label: 'Monthly Payment', value: BLANK, weight: 2 },
-  ], opts.primary.borrowerName);
+  const liabilityList = opts.primary.liabilities || [];
+  if (liabilityList.length) {
+    for (const l of liabilityList) {
+      fieldRow([
+        { label: 'Account Type', value: val(l.accountType), weight: 2 },
+        { label: 'Company Name', value: val(l.company), weight: 3 },
+        { label: 'Account Number', value: val(l.accountNumber), weight: 2 },
+        { label: 'Unpaid Balance', value: fmtCurrency(l.unpaidBalance ?? null), weight: 2 },
+        { label: 'Monthly Payment', value: fmtCurrency(l.monthlyPayment ?? null), weight: 2 },
+      ], opts.primary.borrowerName);
+    }
+  } else {
+    note('See credit report for itemized liabilities.', opts.primary.borrowerName);
+  }
 
   // ==========================================================
   // PAGE 3 — Section 3 (Real Estate Owned) and Section 4 (Loan & Property)
@@ -470,19 +488,25 @@ export async function generateURLA1003Pdf(opts: URLA1003Options): Promise<void> 
   sectionHeader('Section 3: Financial Information — Real Estate', opts.primary.borrowerName);
 
   subsection('3a. Property You Own', opts.primary.borrowerName);
-  note('List each property currently owned. Required if borrower owns real estate other than the subject property.', opts.primary.borrowerName);
-  fieldRow([
-    { label: 'Address', value: BLANK, weight: 4 },
-    { label: 'Status (Sold/Pending Sale/Retained)', value: BLANK, weight: 2 },
-    { label: 'Intended Occupancy', value: BLANK, weight: 2 },
-  ], opts.primary.borrowerName);
-  fieldRow([
-    { label: 'Property Value', value: BLANK, weight: 2 },
-    { label: 'Monthly Insurance, Taxes, HOA', value: BLANK, weight: 2 },
-    { label: 'Mortgage Balance', value: BLANK, weight: 2 },
-    { label: 'Monthly Mortgage Payment', value: BLANK, weight: 2 },
-    { label: 'Gross Monthly Rental Income', value: BLANK, weight: 2 },
-  ], opts.primary.borrowerName);
+  const reoList = opts.primary.realEstate || [];
+  if (reoList.length) {
+    for (const r of reoList) {
+      fieldRow([
+        { label: 'Address', value: val(r.address), weight: 4 },
+        { label: 'Status', value: val(r.status), weight: 2 },
+        { label: 'Occupancy', value: val(r.occupancy), weight: 2 },
+      ], opts.primary.borrowerName);
+      fieldRow([
+        { label: 'Property Value', value: fmtCurrency(r.value ?? null), weight: 2 },
+        { label: 'Monthly Ins/Taxes/HOA', value: fmtCurrency(r.monthlyTaxesInsHoa ?? null), weight: 2 },
+        { label: 'Mortgage Balance', value: fmtCurrency(r.mortgageBalance ?? null), weight: 2 },
+        { label: 'Monthly Mortgage', value: fmtCurrency(r.monthlyMortgage ?? null), weight: 2 },
+        { label: 'Gross Monthly Rent', value: fmtCurrency(r.grossRentalIncome ?? null), weight: 2 },
+      ], opts.primary.borrowerName);
+    }
+  } else {
+    note('No additional properties reported.', opts.primary.borrowerName);
+  }
 
   sectionHeader('Section 4: Loan and Property Information', opts.primary.borrowerName);
 

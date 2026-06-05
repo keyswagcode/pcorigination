@@ -832,6 +832,11 @@ export function BrokerBorrowerDetailPage() {
         declarations: 'declarations' in b ? (b.declarations as URLA1003BorrowerInput['declarations']) ?? null : null,
         military: 'military_service' in b ? (b.military_service as URLA1003BorrowerInput['military']) ?? null : null,
         demographic: 'demographic_info' in b ? (b.demographic_info as URLA1003BorrowerInput['demographic']) ?? null : null,
+        employment: 'employment' in b ? (b.employment as URLA1003BorrowerInput['employment']) ?? null : null,
+        otherIncome: 'other_income' in b ? (b.other_income as URLA1003BorrowerInput['otherIncome']) ?? null : null,
+        assets: 'assets' in b ? (b.assets as URLA1003BorrowerInput['assets']) ?? null : null,
+        liabilities: 'liabilities' in b ? (b.liabilities as URLA1003BorrowerInput['liabilities']) ?? null : null,
+        realEstate: 'real_estate_owned' in b ? (b.real_estate_owned as URLA1003BorrowerInput['realEstate']) ?? null : null,
       });
 
       const generatorOpts = {
