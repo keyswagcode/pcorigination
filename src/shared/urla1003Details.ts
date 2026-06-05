@@ -107,3 +107,81 @@ export function emptyMilitary(): Urla1003Military {
 export function emptyDemographic(): Urla1003Demographic {
   return { ethnicity: [], ethnicityDoNotWish: false, race: [], raceDoNotWish: false, sex: null, sexDoNotWish: false };
 }
+
+// ---- Optional "complete the rest of the 1003" sections (all repeatable) ----
+
+// Section 1b/1c/1d — Employment / Self-Employment and Income
+export interface Urla1003Employment {
+  employerName: string;
+  phone: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  position: string;
+  startDate: string;                       // mm/yyyy
+  yearsInLineOfWork: number | null;
+  selfEmployed: boolean;
+  ownership25OrMore: boolean;              // owner >= 25%
+  monthlyBase: number | null;
+  monthlyOvertime: number | null;
+  monthlyBonus: number | null;
+  monthlyCommission: number | null;
+  monthlyOther: number | null;
+  kind: 'current' | 'additional' | 'previous';
+}
+
+// Section 1e — Income from Other Sources
+export interface Urla1003OtherIncome {
+  source: string;
+  monthlyAmount: number | null;
+}
+
+// Section 2a/2b — Assets
+export interface Urla1003Asset {
+  accountType: string;        // e.g. Checking, Savings, Retirement, Other
+  institution: string;
+  accountNumber: string;
+  value: number | null;
+}
+
+// Section 2c/2d — Liabilities
+export interface Urla1003Liability {
+  accountType: string;        // Revolving, Installment, Lease, Other
+  company: string;
+  accountNumber: string;
+  unpaidBalance: number | null;
+  monthlyPayment: number | null;
+}
+
+// Section 3 — Real Estate Owned
+export interface Urla1003RealEstate {
+  address: string;
+  status: string;             // Sold, Pending Sale, Retained
+  occupancy: string;          // Primary, Second Home, Investment
+  value: number | null;
+  monthlyTaxesInsHoa: number | null;
+  mortgageBalance: number | null;
+  monthlyMortgage: number | null;
+  grossRentalIncome: number | null;
+}
+
+export const ASSET_TYPES = ['Checking', 'Savings', 'Money Market', 'Retirement', 'Stocks/Bonds', 'Other'];
+export const LIABILITY_TYPES = ['Revolving', 'Installment', 'Lease', 'Mortgage', 'Other'];
+export const REO_STATUS = ['Retained', 'Pending Sale', 'Sold'];
+export const REO_OCCUPANCY = ['Primary Residence', 'Second Home', 'Investment'];
+
+export function emptyEmployment(kind: Urla1003Employment['kind'] = 'current'): Urla1003Employment {
+  return {
+    employerName: '', phone: '', street: '', city: '', state: '', zip: '', position: '',
+    startDate: '', yearsInLineOfWork: null, selfEmployed: false, ownership25OrMore: false,
+    monthlyBase: null, monthlyOvertime: null, monthlyBonus: null, monthlyCommission: null, monthlyOther: null,
+    kind,
+  };
+}
+export function emptyOtherIncome(): Urla1003OtherIncome { return { source: '', monthlyAmount: null }; }
+export function emptyAsset(): Urla1003Asset { return { accountType: '', institution: '', accountNumber: '', value: null }; }
+export function emptyLiability(): Urla1003Liability { return { accountType: '', company: '', accountNumber: '', unpaidBalance: null, monthlyPayment: null }; }
+export function emptyRealEstate(): Urla1003RealEstate {
+  return { address: '', status: '', occupancy: '', value: null, monthlyTaxesInsHoa: null, mortgageBalance: null, monthlyMortgage: null, grossRentalIncome: null };
+}
