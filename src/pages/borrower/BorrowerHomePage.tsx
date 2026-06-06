@@ -186,6 +186,13 @@ export function BorrowerHomePage() {
     return () => { cancelled = true; clearInterval(interval); };
   }, [reportPending, borrower, loadData]);
 
+  // While the Plaid report is generating (it can take a minute), auto-open the
+  // rest-of-1003 form so the borrower fills it out instead of staring at a
+  // spinner.
+  useEffect(() => {
+    if (reportPending) setShowCompleteApp(true);
+  }, [reportPending]);
+
   const handlePlaidConnect = () => {
     if (!plaidReady || !linkToken) {
       setError('Bank connection not ready yet — try again in a moment.');
@@ -805,17 +812,21 @@ export function BorrowerHomePage() {
         </div>
       </div>
 
-      {/* Step 3 — Complete Application (the rest of the Form 1003). Optional and
-          only after pre-approval; never required to create an account or get
-          pre-approved. */}
-      {hasPreApproval && (
-        <div className="mt-6 border border-gray-200 rounded-xl bg-white overflow-hidden">
+      {/* Complete Application (rest of the Form 1003). Optional — surfaced as soon
+          as assets are initiated (Plaid connecting / statements uploaded), so the
+          borrower fills it out while the pre-approval is being generated. Never
+          required to create an account or get pre-approved. */}
+      {(reportPending || liquidityVerified || hasPreApproval) && (
+        <div className={`mt-6 border rounded-xl bg-white overflow-hidden ${reportPending ? 'border-teal-300 ring-1 ring-teal-100' : 'border-gray-200'}`}>
           <div className="px-6 py-5 flex items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Complete Your Application</h2>
               <p className="text-sm text-gray-500 mt-0.5">
-                You're pre-approved! When you're ready, finish the rest of your loan application (Form 1003) —
-                declarations, military service, and demographic information.
+                {reportPending
+                  ? 'Your bank connection is processing — this can take a minute. Use the time to finish the rest of your application (Form 1003) below so your file is ready the moment you’re pre-approved.'
+                  : hasPreApproval
+                    ? 'You’re pre-approved! Finish the rest of your loan application (Form 1003) — declarations, employment & income, assets, real estate, and demographic information.'
+                    : 'Get a head start — finish the rest of your loan application (Form 1003) while we verify your assets.'}
               </p>
             </div>
             {!showCompleteApp && (
