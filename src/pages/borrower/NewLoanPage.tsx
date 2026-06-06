@@ -245,6 +245,19 @@ export function NewLoanPage() {
               <p className="text-sm text-gray-500 mt-1">Refinance an existing property</p>
             </div>
           </button>
+
+          <button
+            onClick={() => navigate('/application/commercial-intake')}
+            className="sm:col-span-2 flex items-center gap-4 p-6 border-2 border-gray-200 rounded-xl hover:border-teal-500 hover:bg-teal-50 transition-all group text-left"
+          >
+            <div className="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center group-hover:bg-amber-200 transition-colors shrink-0">
+              <Building2 className="w-7 h-7 text-amber-700" />
+            </div>
+            <div>
+              <p className="text-xl font-semibold text-gray-900">Commercial</p>
+              <p className="text-sm text-gray-500 mt-1">Multifamily, office, retail, hotel, construction & more — opens the commercial intake form</p>
+            </div>
+          </button>
         </div>
       )}
 
