@@ -9,6 +9,10 @@ interface Transaction {
   name?: string;
   original_description?: string;
   category?: string[] | null;
+  credit_category?: {
+    primary?: string;
+    detailed?: string;
+  } | null;
   personal_finance_category?: {
     primary?: string;
     detailed?: string;
@@ -49,17 +53,14 @@ const EXCLUDE_PRIMARY = new Set([
 const EXCLUDE_LEGACY = new Set(['transfer', 'credit', 'refund', 'reimbursement', 'cash advance', 'payment', 'fee', 'atm']);
 
 function isIncomeTransaction(tx: Transaction): boolean {
-  // Plaid convention: deposits/inflows have negative amounts on credit-card-style
-  // accounts but POSITIVE on depository accounts when reported via the CRA Check
-  // base report. We treat positive amounts on depository as the inflow direction.
-  const amount = Number(tx.amount) || 0;
-  if (amount <= 0) return false;
-
-  const pfc = tx.personal_finance_category;
-  if (pfc?.primary) {
-    if (EXCLUDE_PRIMARY.has(pfc.primary)) return false;
-    if (DEPOSIT_INCOME_PRIMARY.has(pfc.primary)) return true;
-    return false;
+  // CRA base-report transactions categorize under `credit_category` (inflows are
+  // signed negative). We categorize by the INCOME bucket and ignore sign — the
+  // caller sums abs(amount). `personal_finance_category` is a fallback for other
+  // report shapes.
+  const primary = tx.credit_category?.primary || tx.personal_finance_category?.primary;
+  if (primary) {
+    if (EXCLUDE_PRIMARY.has(primary)) return false;
+    return DEPOSIT_INCOME_PRIMARY.has(primary);
   }
 
   // Fallback to legacy category array

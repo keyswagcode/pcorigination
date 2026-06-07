@@ -28,12 +28,14 @@ const EXCLUDE_PRIMARY = new Set(['TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS',
 const EXCLUDE_LEGACY = new Set(['transfer', 'credit', 'refund', 'reimbursement', 'cash advance', 'payment', 'fee', 'atm'])
 
 function isIncomeTx(tx: Record<string, unknown>): boolean {
-  const amount = Number(tx?.amount) || 0
-  if (amount <= 0) return false // depository inflows are positive in CRA reports
-  const pfc = tx?.personal_finance_category as { primary?: string } | null | undefined
-  if (pfc?.primary) {
-    if (EXCLUDE_PRIMARY.has(pfc.primary)) return false
-    return INCOME_PRIMARY.has(pfc.primary)
+  // CRA base-report transactions categorize under `credit_category`
+  // (not `personal_finance_category`), and inflows are signed NEGATIVE — so we
+  // categorize by the INCOME bucket and ignore sign (use abs in the sum).
+  const cc = (tx?.credit_category as { primary?: string } | null)?.primary
+    || (tx?.personal_finance_category as { primary?: string } | null)?.primary
+  if (cc) {
+    if (EXCLUDE_PRIMARY.has(cc)) return false
+    return INCOME_PRIMARY.has(cc)
   }
   const cats = ((tx?.category as string[] | null) || []).map((c) => String(c).toLowerCase())
   if (cats.length === 0) return false
