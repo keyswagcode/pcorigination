@@ -89,6 +89,10 @@ export interface URLA1003Options {
 const BLANK = '____________________';
 const BLANK_SHORT = '_______';
 
+// Key Real Estate Capital company (organization) NMLS identifier — used wherever
+// the 1003 asks for the company/originator-organization NMLS#.
+const COMPANY_NMLS_ID = '2676974';
+
 function fmtCurrency(n: number | null | undefined): string {
   if (n == null || isNaN(n)) return BLANK;
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n);
@@ -680,7 +684,7 @@ export async function generateURLA1003Pdf(opts: URLA1003Options): Promise<void> 
     { label: 'Date Application Prepared', value: opts.generatedDate, weight: 2 },
   ], opts.primary.borrowerName);
   fieldRow([
-    { label: 'NMLS ID — Organization', value: BLANK, weight: 2 },
+    { label: 'NMLS ID — Organization', value: `#${COMPANY_NMLS_ID}`, weight: 2 },
     { label: 'NMLS ID — Individual', value: BLANK, weight: 2 },
     { label: 'State License — Organization', value: BLANK, weight: 2 },
     { label: 'State License — Individual', value: BLANK, weight: 2 },
