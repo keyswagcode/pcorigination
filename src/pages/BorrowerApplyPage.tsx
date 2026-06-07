@@ -40,6 +40,7 @@ export function BorrowerApplyPage() {
   const [addressCity, setAddressCity] = useState('');
   const [addressState, setAddressState] = useState('');
   const [addressZip, setAddressZip] = useState('');
+  const [citizenship, setCitizenship] = useState<'us_citizen' | 'permanent_resident' | 'foreign_national'>('us_citizen');
   const [creditConsent, setCreditConsent] = useState(false);
 
   // Track created user for profile step
@@ -210,6 +211,7 @@ export function BorrowerApplyPage() {
         address_zip: addressZip,
         state_of_residence: addressState,
         broker_id: resolvedBrokerId,
+        foreign_national: citizenship === 'foreign_national',
         credit_consent: creditConsent,
         credit_consent_at: consentedAt,
         borrower_status: 'draft',
@@ -590,6 +592,23 @@ export function BorrowerApplyPage() {
                       required
                     />
                   </div>
+                </div>
+
+                {/* Citizenship */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Citizenship Status</label>
+                  <select
+                    value={citizenship}
+                    onChange={e => setCitizenship(e.target.value as typeof citizenship)}
+                    className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
+                  >
+                    <option value="us_citizen">U.S. Citizen</option>
+                    <option value="permanent_resident">Permanent Resident Alien</option>
+                    <option value="foreign_national">Foreign National (non-permanent resident)</option>
+                  </select>
+                  {citizenship === 'foreign_national' && (
+                    <p className="text-xs text-amber-700 mt-1.5">Foreign-national loans require 35% down (max 65% LTV) and a $100k minimum loan amount.</p>
+                  )}
                 </div>
 
                 {/* Credit Consent */}
