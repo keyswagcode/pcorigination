@@ -10,6 +10,9 @@ import type { URLA1003BorrowerInput, URLA1003LoanInput, URLA1003Options } from '
 const MISMO_VERSION = '3.4.032420160128.5';
 const MISMO_NS = 'http://www.mismo.org/residential/2009/schemas';
 
+// Key Real Estate Capital company (loan-origination-company) NMLS identifier.
+const COMPANY_NMLS_ID = '2676974';
+
 export async function generateURLA1003MismoXml(opts: URLA1003Options): Promise<string> {
   const xml = buildMessage(opts);
   triggerDownload(xml, opts.fileName || defaultFileName(opts));
@@ -384,9 +387,13 @@ function buildResidence(r: {
 }
 
 function buildOriginatorParty(opts: URLA1003Options): string {
-  const legalEntity = wrap('LEGAL_ENTITY',
-    wrap('LEGAL_ENTITY_DETAIL', tag('FullName', opts.orgName))
-  );
+  const legalEntity = wrap('LEGAL_ENTITY', [
+    wrap('LEGAL_ENTITY_DETAIL', tag('FullName', opts.orgName)),
+    wrap('LICENSES', wrap('LICENSE', wrap('LICENSE_DETAIL', [
+      tag('LicenseAuthorityLevelType', 'Federal'),
+      tag('LicenseIdentifier', COMPANY_NMLS_ID),
+    ].join('')))),
+  ].join(''));
 
   const contactName = splitName(opts.brokerName);
   const individual = wrap('INDIVIDUAL', [
