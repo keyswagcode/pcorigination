@@ -11,6 +11,21 @@ import { AddressAutocomplete } from '../components/AddressAutocomplete';
 
 type Step = 'credentials' | 'profile';
 
+// Supabase/PostgREST errors are plain objects ({ message, code, details, hint }),
+// not Error instances — so `err instanceof Error` masks them as a generic message.
+// Surface the most useful text we can find from any error shape.
+function errorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    if (e.message) return e.code ? `${e.message} (${e.code})` : e.message;
+    if (e.details) return e.details;
+    if (e.hint) return e.hint;
+  }
+  if (typeof err === 'string' && err) return err;
+  return 'An error occurred';
+}
+
 export function BorrowerApplyPage() {
   const { posSlug } = useParams<{ posSlug: string }>();
   const navigate = useNavigate();
@@ -160,7 +175,7 @@ export function BorrowerApplyPage() {
         // Login will trigger redirect via useEffect
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(errorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -261,7 +276,7 @@ export function BorrowerApplyPage() {
 
       navigate('/application', { replace: true });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      setError(errorMessage(err));
     } finally {
       setIsLoading(false);
     }
