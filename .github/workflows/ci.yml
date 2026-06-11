@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  typecheck-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Strict typecheck — the `build` script swallows tsc errors with
+      # `|| true`, which is how column-name bugs reached prod. Fail the PR here.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npx vite build
