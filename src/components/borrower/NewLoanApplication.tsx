@@ -543,7 +543,7 @@ export function NewLoanApplication({ onComplete, onCancel: _onCancel, existingSu
         borrower_id: borrowerId,
         file_path: filePath,
         file_name: file.name,
-        file_size_bytes: file.size,
+        file_size: file.size,
         mime_type: file.type,
         document_type: 'bank_statement',
         processing_status: 'pending',

@@ -62,7 +62,7 @@ interface LoanApplicationFull {
     id: string;
     file_name: string;
     file_path: string;
-    file_size_bytes: number;
+    file_size: number;
     document_type: string;
     processing_status: string;
     extraction_status: string;
@@ -268,7 +268,7 @@ export function LoanApplicationDetail({ applicationId, source = 'intake', initia
             id,
             file_name,
             file_path,
-            file_size_bytes,
+            file_size,
             document_type,
             processing_status,
             extraction_status,
@@ -589,7 +589,7 @@ export function LoanApplicationDetail({ applicationId, source = 'intake', initia
           borrower_id: submission.borrower_id,
           file_path: filePath,
           file_name: file.name,
-          file_size_bytes: file.size,
+          file_size: file.size,
           mime_type: file.type,
           document_type: 'bank_statement',
           processing_status: 'pending',
@@ -1284,10 +1284,10 @@ export function LoanApplicationDetail({ applicationId, source = 'intake', initia
                             <span className="capitalize">
                               {doc.document_type?.replace(/_/g, ' ') || 'Document'}
                             </span>
-                            {doc.file_size_bytes > 0 && (
+                            {doc.file_size > 0 && (
                               <>
                                 <span className="text-gray-300">|</span>
-                                <span>{formatFileSize(doc.file_size_bytes)}</span>
+                                <span>{formatFileSize(doc.file_size)}</span>
                               </>
                             )}
                             <span className="text-gray-300">|</span>

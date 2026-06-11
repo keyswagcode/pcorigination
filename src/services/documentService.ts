@@ -23,7 +23,7 @@ export async function uploadDocument(
       borrower_id: borrowerId,
       file_path: filePath,
       file_name: file.name,
-      file_size_bytes: file.size,
+      file_size: file.size,
       mime_type: file.type,
       document_type: 'bank_statement',
       processing_status: 'pending',
@@ -47,7 +47,12 @@ export async function uploadBorrowerDocument(
   documentType: string,
   documentSubtype?: string,
 ): Promise<string> {
-  const filePath = `${borrowerId}/${documentType}/${fileName}`;
+  // Store under the canonical borrowers/{auth_user_id}/... prefix (same as
+  // bank-statement uploads) so storage policies that key off the caller's
+  // folder keep working. Falls back to the borrower id when no session.
+  const { data: auth } = await supabase.auth.getUser();
+  const ownerSegment = auth?.user?.id || borrowerId;
+  const filePath = `borrowers/${ownerSegment}/${documentType}/${fileName}`;
 
   const { error: storageError } = await supabase.storage
     .from('borrower-documents')
@@ -60,7 +65,7 @@ export async function uploadBorrowerDocument(
       borrower_id: borrowerId,
       file_path: filePath,
       file_name: fileName,
-      file_size_bytes: blob.size,
+      file_size: blob.size,
       mime_type: blob.type || 'application/pdf',
       document_type: documentType,
       document_subtype: documentSubtype || null,
