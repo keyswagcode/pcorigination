@@ -881,7 +881,7 @@ export function PreApprovalFlow({ forceNew = false, existingSubmissionId, onComp
         borrower_id: borrowerId || null,
         file_path: filePath,
         file_name: file.name,
-        file_size_bytes: file.size,
+        file_size: file.size,
         mime_type: file.type,
         document_type: 'bank_statement',
         processing_status: 'pending',

@@ -122,7 +122,7 @@ export function DocumentUploadPanel({ borrowerId, borrowerType = 'personal', onU
             document_type: file.type,
             file_name: file.file.name,
             file_path: filePath,
-            file_size_bytes: file.file.size,
+            file_size: file.file.size,
             mime_type: file.file.type,
             processing_status: 'pending'
           });
