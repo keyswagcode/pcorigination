@@ -336,8 +336,16 @@ async function processDocument(
 
   console.log(`[JOB][${job.id}] FINAL EXTRACTED: bank=${extracted.bank_name}, closing=${extracted.closing_balance}, deposits=${extracted.total_deposits}, confidence=${extracted.confidence}`);
 
-  if (extracted.confidence < 0.2) {
-    console.warn(`[JOB][${job.id}] Extraction confidence low (${extracted.confidence}) — inserting with low_confidence flag`);
+  // When the model couldn't actually read the statement (low confidence, or a
+  // $0/Unknown-Bank placeholder), flag it so the broker queue can tell
+  // "verified $0" apart from "unreadable — needs human eyes."
+  const needsReview =
+    extracted.confidence < 0.5 ||
+    !extracted.bank_name ||
+    /unknown/i.test(extracted.bank_name) ||
+    (Number(extracted.closing_balance) || 0) === 0;
+  if (needsReview) {
+    console.warn(`[JOB][${job.id}] Flagging needs_review (confidence ${extracted.confidence}, bank "${extracted.bank_name}")`);
   }
 
   const { data: existingAccount } = await supabase
@@ -376,6 +384,7 @@ async function processDocument(
     deposit_count: extracted.deposit_count,
     withdrawal_count: extracted.withdrawal_count,
     extraction_confidence: extracted.confidence,
+    needs_review: needsReview,
     extraction_version: "9.0-openai-files",
     raw_extracted_data: {
       extraction_method: doc.mime_type === "application/pdf" ? "openai_files_api" : "openai_vision",
@@ -413,7 +422,7 @@ async function processDocument(
   await supabase
     .from("uploaded_documents")
     .update({
-      processing_status: "completed",
+      processing_status: needsReview ? "needs_review" : "completed",
       extraction_status: "completed",
       classification_confidence: extracted.confidence,
       is_processed: true,
@@ -579,6 +588,57 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({ error: "submission_id is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Require a real user JWT and verify the caller owns this submission (or is
+    // staff). Previously the function ran on the public anon key alone, so
+    // anyone could trigger OpenAI extraction on any submission_id.
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+    const { data: authData } = await supabase.auth.getUser(token);
+    const caller = authData?.user;
+    if (!caller) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const { data: sub } = await supabase
+      .from("intake_submissions")
+      .select("id, user_id, borrower_id")
+      .eq("id", submission_id)
+      .maybeSingle();
+
+    if (!sub) {
+      return new Response(
+        JSON.stringify({ error: "Submission not found" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    let allowed = sub.user_id === caller.id;
+    if (!allowed && sub.borrower_id) {
+      const { data: b } = await supabase
+        .from("borrowers")
+        .select("user_id, broker_id")
+        .eq("id", sub.borrower_id)
+        .maybeSingle();
+      allowed = b?.user_id === caller.id || b?.broker_id === caller.id;
+    }
+    if (!allowed) {
+      const { data: acct } = await supabase
+        .from("user_accounts")
+        .select("user_role")
+        .eq("id", caller.id)
+        .maybeSingle();
+      allowed = acct?.user_role === "admin" || acct?.user_role === "reviewer";
+    }
+    if (!allowed) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 

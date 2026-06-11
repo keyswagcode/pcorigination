@@ -1429,11 +1429,15 @@ export function BrokerBorrowerDetailPage() {
                       <p className="text-xs text-gray-500">
                         {doc.document_type.replace(/_/g, ' ')} &middot; {new Date(doc.created_at).toLocaleDateString()}
                         <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
-                          doc.processing_status === 'completed' || doc.processing_status === 'uploaded'
+                          doc.processing_status === 'needs_review'
+                            ? 'bg-amber-100 text-amber-800'
+                            : doc.processing_status === 'failed' || doc.processing_status === 'error'
+                            ? 'bg-red-100 text-red-700'
+                            : doc.processing_status === 'completed' || doc.processing_status === 'uploaded'
                             ? 'bg-green-100 text-green-700'
                             : 'bg-gray-100 text-gray-500'
                         }`}>
-                          {doc.processing_status}
+                          {doc.processing_status === 'needs_review' ? 'needs review' : doc.processing_status}
                         </span>
                       </p>
                     </div>

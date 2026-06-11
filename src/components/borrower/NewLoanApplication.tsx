@@ -673,11 +673,12 @@ export function NewLoanApplication({ onComplete, onCancel: _onCancel, existingSu
 
       setProcessingStatus('Running OCR and document scanning...');
 
+      const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-documents`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
         body: JSON.stringify({ submission_id: targetSubmissionId }),
       });
@@ -764,11 +765,12 @@ export function NewLoanApplication({ onComplete, onCancel: _onCancel, existingSu
     setProcessingStatus('Submitting documents for processing...');
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-documents`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
         body: JSON.stringify({ submission_id: submissionId }),
       });
