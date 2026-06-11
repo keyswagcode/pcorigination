@@ -8,6 +8,7 @@ import { syncBorrowerToGhl } from '../services/ghlSyncService';
 import { creditConsentPdfToBlob } from '../lib/creditConsentGenerator';
 import { uploadBorrowerDocument } from '../services/documentService';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
+import { logError } from '../lib/errorLog';
 
 type Step = 'credentials' | 'profile';
 
@@ -175,6 +176,7 @@ export function BorrowerApplyPage() {
         // Login will trigger redirect via useEffect
       }
     } catch (err: unknown) {
+      logError('borrower.credentials', err);
       setError(errorMessage(err));
     } finally {
       setIsLoading(false);
@@ -253,9 +255,9 @@ export function BorrowerApplyPage() {
             `credit_consent_${ts}.pdf`,
             'credit_consent',
             'borrower_authorization',
-          ).catch(e => console.warn('Credit-consent PDF upload failed (non-fatal):', e));
+          ).catch(e => logError('credit_consent.upload', e, { borrowerId: insertedBorrower.id }));
         } catch (e) {
-          console.warn('Credit-consent PDF generation failed (non-fatal):', e);
+          logError('credit_consent.generate', e, { borrowerId: insertedBorrower?.id });
         }
       }
 
@@ -276,6 +278,7 @@ export function BorrowerApplyPage() {
 
       navigate('/application', { replace: true });
     } catch (err: unknown) {
+      logError('borrower.profile_create', err);
       setError(errorMessage(err));
     } finally {
       setIsLoading(false);
