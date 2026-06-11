@@ -1,36 +1,51 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TeamProvider } from './components/team/TeamContext';
 import { LoginPage } from './components/auth/LoginPage';
 import { BorrowerLayout } from './layouts/BorrowerLayout';
 import { InternalLayout } from './layouts/InternalLayout';
-import { BorrowerHomePage } from './pages/borrower/BorrowerHomePage';
-import { NewLoanPage } from './pages/borrower/NewLoanPage';
-import BorrowerCommercialIntakePage from './pages/borrower/BorrowerCommercialIntakePage';
-import { BorrowerQueuePage } from './pages/internal/BorrowerQueuePage';
-import { BorrowerFilePage } from './pages/internal/BorrowerFilePage';
-import { InternalPlacerBotPage } from './pages/internal/InternalPlacerBotPage';
-import { AllLoansPage } from './pages/internal/AllLoansPage';
-import { AllFilesPage } from './pages/internal/AllFilesPage';
-import { AllApplicationsPage } from './pages/internal/AllApplicationsPage';
-import { BorrowerApplyPage } from './pages/BorrowerApplyPage';
-import { BorrowerDocumentsPage } from './pages/borrower/BorrowerDocumentsPage';
-import { BorrowerLoansPage } from './pages/borrower/BorrowerLoansPage';
-import { BorrowerProfilePage } from './pages/borrower/BorrowerProfilePage';
-import { BorrowerLoanEditPage } from './pages/borrower/BorrowerLoanEditPage';
-import { BrokerDashboardPage } from './pages/broker/BrokerDashboardPage';
-import { BrokerBorrowersPage } from './pages/broker/BrokerBorrowersPage';
-import { BrokerBorrowerDetailPage } from './pages/broker/BrokerBorrowerDetailPage';
-import { BrokerLoanReviewPage } from './pages/broker/BrokerLoanReviewPage';
-import { BrokerSettingsPage } from './pages/broker/BrokerSettingsPage';
-import { ResetPasswordPage } from './pages/ResetPasswordPage';
-import { CoBorrowerInvitePage } from './pages/CoBorrowerInvitePage';
-import { BorrowerServicingPage } from './pages/borrower/BorrowerServicingPage';
-import { BorrowerServicedLoanPage } from './pages/borrower/BorrowerServicedLoanPage';
-import { AdminServicingListPage } from './pages/internal/AdminServicingListPage';
-import { OnboardServicedLoanPage } from './pages/internal/OnboardServicedLoanPage';
-import { AdminServicedLoanDetailPage } from './pages/internal/AdminServicedLoanDetailPage';
+
+// Routes are lazy-loaded so the initial bundle isn't one ~1.3 MB chunk that
+// loads every portal + jsPDF/html2canvas up front. Each page (and its heavy
+// deps) is fetched on demand. Named exports are mapped to default for lazy().
+const BorrowerHomePage = lazy(() => import('./pages/borrower/BorrowerHomePage').then(m => ({ default: m.BorrowerHomePage })));
+const NewLoanPage = lazy(() => import('./pages/borrower/NewLoanPage').then(m => ({ default: m.NewLoanPage })));
+const BorrowerCommercialIntakePage = lazy(() => import('./pages/borrower/BorrowerCommercialIntakePage'));
+const BorrowerQueuePage = lazy(() => import('./pages/internal/BorrowerQueuePage').then(m => ({ default: m.BorrowerQueuePage })));
+const BorrowerFilePage = lazy(() => import('./pages/internal/BorrowerFilePage').then(m => ({ default: m.BorrowerFilePage })));
+const InternalPlacerBotPage = lazy(() => import('./pages/internal/InternalPlacerBotPage').then(m => ({ default: m.InternalPlacerBotPage })));
+const AllLoansPage = lazy(() => import('./pages/internal/AllLoansPage').then(m => ({ default: m.AllLoansPage })));
+const AllFilesPage = lazy(() => import('./pages/internal/AllFilesPage').then(m => ({ default: m.AllFilesPage })));
+const AllApplicationsPage = lazy(() => import('./pages/internal/AllApplicationsPage').then(m => ({ default: m.AllApplicationsPage })));
+const BorrowerApplyPage = lazy(() => import('./pages/BorrowerApplyPage').then(m => ({ default: m.BorrowerApplyPage })));
+const BorrowerDocumentsPage = lazy(() => import('./pages/borrower/BorrowerDocumentsPage').then(m => ({ default: m.BorrowerDocumentsPage })));
+const BorrowerLoansPage = lazy(() => import('./pages/borrower/BorrowerLoansPage').then(m => ({ default: m.BorrowerLoansPage })));
+const BorrowerProfilePage = lazy(() => import('./pages/borrower/BorrowerProfilePage').then(m => ({ default: m.BorrowerProfilePage })));
+const BorrowerLoanEditPage = lazy(() => import('./pages/borrower/BorrowerLoanEditPage').then(m => ({ default: m.BorrowerLoanEditPage })));
+const BrokerDashboardPage = lazy(() => import('./pages/broker/BrokerDashboardPage').then(m => ({ default: m.BrokerDashboardPage })));
+const BrokerBorrowersPage = lazy(() => import('./pages/broker/BrokerBorrowersPage').then(m => ({ default: m.BrokerBorrowersPage })));
+const BrokerBorrowerDetailPage = lazy(() => import('./pages/broker/BrokerBorrowerDetailPage').then(m => ({ default: m.BrokerBorrowerDetailPage })));
+const BrokerLoanReviewPage = lazy(() => import('./pages/broker/BrokerLoanReviewPage').then(m => ({ default: m.BrokerLoanReviewPage })));
+const BrokerSettingsPage = lazy(() => import('./pages/broker/BrokerSettingsPage').then(m => ({ default: m.BrokerSettingsPage })));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage })));
+const CoBorrowerInvitePage = lazy(() => import('./pages/CoBorrowerInvitePage').then(m => ({ default: m.CoBorrowerInvitePage })));
+const BorrowerServicingPage = lazy(() => import('./pages/borrower/BorrowerServicingPage').then(m => ({ default: m.BorrowerServicingPage })));
+const BorrowerServicedLoanPage = lazy(() => import('./pages/borrower/BorrowerServicedLoanPage').then(m => ({ default: m.BorrowerServicedLoanPage })));
+const AdminServicingListPage = lazy(() => import('./pages/internal/AdminServicingListPage').then(m => ({ default: m.AdminServicingListPage })));
+const OnboardServicedLoanPage = lazy(() => import('./pages/internal/OnboardServicedLoanPage').then(m => ({ default: m.OnboardServicedLoanPage })));
+const AdminServicedLoanDetailPage = lazy(() => import('./pages/internal/AdminServicedLoanDetailPage').then(m => ({ default: m.AdminServicedLoanDetailPage })));
+
+function RouteFallback() {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="flex items-center gap-3 text-gray-500">
+        <div className="w-6 h-6 border-2 border-teal-600 border-t-transparent rounded-full animate-spin" />
+        <span>Loading...</span>
+      </div>
+    </div>
+  );
+}
 
 function LoginGuard() {
   const { user, userAccount, isLoading, accountFetched } = useAuth();
@@ -142,6 +157,7 @@ function AppRoutes() {
 
   return (
     <TeamProvider>
+      <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/login" element={<LoginGuard />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -201,6 +217,7 @@ function AppRoutes() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </TeamProvider>
   );
 }
