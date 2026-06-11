@@ -630,7 +630,8 @@ export function LoanApplicationDetail({ applicationId, source = 'intake', initia
 
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const { data: { session } } = await supabase.auth.getSession();
+      const supabaseKey = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
 
       const response = await fetch(`${supabaseUrl}/functions/v1/process-documents`, {
         method: 'POST',

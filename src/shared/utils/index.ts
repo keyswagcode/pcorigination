@@ -107,7 +107,10 @@ export function isValidBankAccount(acc: BankAccountInput): boolean {
 }
 
 export function isDocumentProcessed(status?: string | null): boolean {
-  return ['completed', 'processed', 'documents_processed', 'complete', 'success', 'done'].includes((status || '').toLowerCase());
+  // 'needs_review' = extraction finished but low-confidence; a human verifies.
+  // Processing is done, so for the borrower it's not a spinner/error — the
+  // broker queue keys off the needs_review flag instead.
+  return ['completed', 'processed', 'documents_processed', 'complete', 'success', 'done', 'needs_review'].includes((status || '').toLowerCase());
 }
 
 export function isDocumentProcessing(status?: string | null): boolean {
