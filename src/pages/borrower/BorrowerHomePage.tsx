@@ -4,6 +4,7 @@ import { usePlaidLink } from 'react-plaid-link';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { createLinkToken, notifyLinkSuccess, getReportStatus } from '../../services/plaidService';
+import { logError } from '../../lib/errorLog';
 import { generatePreApprovalPdf, fetchOrgBrandingForBorrower } from '../../lib/pdfGenerator';
 import { Urla1003DetailsForm } from '../../components/borrower/Urla1003DetailsForm';
 import {
@@ -105,6 +106,7 @@ export function BorrowerHomePage() {
       const token = await createLinkToken();
       setLinkToken(token);
     } catch (err) {
+      logError('plaid.create_link_token', err);
       setError(err instanceof Error ? err.message : 'Failed to initialize bank link');
     }
   }, []);
@@ -134,7 +136,7 @@ export function BorrowerHomePage() {
       // statement-upload fallback. A null error means the user just closed
       // the modal — no message needed.
       if (plaidErr) {
-        console.error('Plaid Link exit error:', plaidErr);
+        logError('plaid.link_exit', plaidErr, { error_code: plaidErr.error_code, error_type: plaidErr.error_type });
         const detail = plaidErr.display_message || plaidErr.error_message || plaidErr.error_code || 'Connection failed';
         setError(`Bank connection didn't complete: ${detail}. You can try again, or upload bank statements below instead.`);
         // Plaid invalidates the token after some errors — get a fresh one.
@@ -387,13 +389,13 @@ export function BorrowerHomePage() {
         await loadData();
       } catch (analysisErr) {
         // Files are already stored — never show the borrower an analysis error.
-        console.error('Bank statement analysis failed; falling back to manual review:', analysisErr);
+        logError('statement.analysis', analysisErr, { borrowerId: borrower.id, files: uploadedFileNames });
         await fallBackToManualReview(borrower.id, uploadedFileNames);
       }
     } catch (err: unknown) {
       // Only reaches here if the upload itself (storage/DB) failed — the file
       // was NOT saved, so the borrower genuinely needs to retry.
-      console.error('Bank statement upload error:', err);
+      logError('statement.upload', err, { borrowerId: borrower?.id });
       const message = err instanceof Error ? err.message
         : typeof err === 'object' && err !== null && 'message' in err ? String((err as { message: unknown }).message)
         : 'Upload failed. Please try again or contact your broker.';
