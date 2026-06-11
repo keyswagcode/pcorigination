@@ -127,7 +127,20 @@ export function BorrowerHomePage() {
       });
       refreshLinkToken();
     },
-    onExit: () => { setPlaidLoading(false); },
+    onExit: (plaidErr) => {
+      setPlaidLoading(false);
+      // Surface the real Plaid Link error (institution down, identity
+      // mismatch, etc.) instead of failing silently, and always offer the
+      // statement-upload fallback. A null error means the user just closed
+      // the modal — no message needed.
+      if (plaidErr) {
+        console.error('Plaid Link exit error:', plaidErr);
+        const detail = plaidErr.display_message || plaidErr.error_message || plaidErr.error_code || 'Connection failed';
+        setError(`Bank connection didn't complete: ${detail}. You can try again, or upload bank statements below instead.`);
+        // Plaid invalidates the token after some errors — get a fresh one.
+        refreshLinkToken();
+      }
+    },
   });
 
   // Poll for Plaid Check report readiness while pending. First check runs
@@ -206,6 +219,19 @@ export function BorrowerHomePage() {
   // PDF upload handler
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
+  // Once statements are safely stored, automated extraction failing must never
+  // surface as an error — the files are kept and a human reviews them instead.
+  const fallBackToManualReview = async (borrowerId: string, fileNames: string[]) => {
+    await supabase.from('borrowers')
+      .update({ borrower_status: 'submitted' })
+      .eq('id', borrowerId);
+    setUploadSuccess(
+      `We received ${fileNames.join(', ')}. We couldn't automatically read the statement details, ` +
+      `so your broker will review them and follow up shortly with your pre-approval. No action needed.`
+    );
+    await loadData();
+  };
+
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || !borrower || !user) return;
@@ -263,106 +289,114 @@ export function BorrowerHomePage() {
 
       setUploadSuccess(`Uploaded ${uploadedFileNames.join(', ')}. Analyzing your bank statements...`);
 
-      // 3. Call the process-documents edge function
-      await supabase
-        .from('intake_submissions')
-        .update({ processing_stage: 'documents_processing' })
-        .eq('id', submissionId);
+      // The files are stored and recorded — from here on, any analysis failure
+      // falls back to manual broker review instead of erroring the borrower.
+      try {
+        // 3. Call the process-documents edge function
+        await supabase
+          .from('intake_submissions')
+          .update({ processing_stage: 'documents_processing' })
+          .eq('id', submissionId);
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-documents`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ submission_id: submissionId }),
-      });
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-documents`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ submission_id: submissionId }),
+        });
 
-      const responseBody = await response.text().catch(() => '');
-      console.log('Edge function response:', response.status, responseBody);
+        const responseBody = await response.text().catch(() => '');
+        console.log('Edge function response:', response.status, responseBody);
 
-      if (!response.ok) {
-        throw new Error(`Processing failed (${response.status}): ${responseBody.slice(0, 200)}`);
-      }
-
-      let edgeResult: { processed?: number; failed?: number; errors?: string[] } = {};
-      try { edgeResult = JSON.parse(responseBody); } catch { /* ignore parse error */ }
-      console.log('Edge function result:', edgeResult);
-
-      if (edgeResult.processed === 0 && edgeResult.failed && edgeResult.failed > 0) {
-        throw new Error(`Document processing failed: ${edgeResult.errors?.join('; ') || 'Unknown error'}`);
-      }
-
-      // 4. Poll for bank_statement_accounts results
-      let accounts: Record<string, unknown>[] = [];
-      // Try immediately first, then poll
-      for (let i = 0; i < 15; i++) {
-        if (i > 0) await new Promise(r => setTimeout(r, 3000));
-        const { data: polled } = await supabase
-          .from('bank_statement_accounts')
-          .select('*')
-          .eq('intake_submission_id', submissionId);
-        if (polled && polled.length > 0) {
-          accounts = polled;
-          break;
+        if (!response.ok) {
+          throw new Error(`Processing failed (${response.status}): ${responseBody.slice(0, 200)}`);
         }
+
+        let edgeResult: { processed?: number; failed?: number; errors?: string[] } = {};
+        try { edgeResult = JSON.parse(responseBody); } catch { /* ignore parse error */ }
+        console.log('Edge function result:', edgeResult);
+
+        if (edgeResult.processed === 0 && edgeResult.failed && edgeResult.failed > 0) {
+          throw new Error(`Document processing failed: ${edgeResult.errors?.join('; ') || 'Unknown error'}`);
+        }
+
+        // 4. Poll for bank_statement_accounts results
+        let accounts: Record<string, unknown>[] = [];
+        // Try immediately first, then poll
+        for (let i = 0; i < 15; i++) {
+          if (i > 0) await new Promise(r => setTimeout(r, 3000));
+          const { data: polled } = await supabase
+            .from('bank_statement_accounts')
+            .select('*')
+            .eq('intake_submission_id', submissionId);
+          if (polled && polled.length > 0) {
+            accounts = polled;
+            break;
+          }
+        }
+
+        // 5. Compute liquidity from extracted accounts. Treat "nothing usable"
+        // (no rows, unreadable extraction, or $0 liquidity) as manual review.
+        const totalLiquidity = accounts.reduce((sum, a) => sum + (Number(a.closing_balance) || 0), 0);
+        const avgConfidence = accounts.length > 0
+          ? accounts.reduce((sum, a) => sum + (Number(a.extraction_confidence) || 0), 0) / accounts.length
+          : 0;
+
+        if (accounts.length === 0 || totalLiquidity <= 0 || avgConfidence < 0.2) {
+          console.warn('Statement extraction unusable — falling back to manual review', { accounts: accounts.length, totalLiquidity, avgConfidence });
+          await fallBackToManualReview(borrower.id, uploadedFileNames);
+          return;
+        }
+
+        // Update borrower financial profile
+        await supabase.from('borrower_financial_profiles').upsert({
+          borrower_id: borrower.id,
+          liquidity_estimate: totalLiquidity,
+          ending_balance_avg: totalLiquidity / accounts.length,
+          avg_monthly_deposits: accounts.reduce((sum, a) => sum + (Number(a.total_deposits) || 0), 0) / accounts.length,
+          confidence_score: Math.round(avgConfidence * 100),
+          summary: {
+            source: 'ai_extraction',
+            extractions: accounts.map(a => ({
+              bank: a.bank_name,
+              holder: a.account_holder_name,
+              closing_balance: a.closing_balance,
+              deposits: a.total_deposits,
+              withdrawals: a.total_withdrawals,
+            })),
+            total_liquidity: totalLiquidity,
+            verified_at: new Date().toISOString(),
+          },
+        }, { onConflict: 'borrower_id' });
+
+        // Manual-upload borrowers do NOT get auto-generated pre-approvals.
+        // The broker reviews the extracted statements and finalizes a
+        // pre-approval manually. The dashboard surfaces these with a
+        // "Pending Pre-approval" badge.
+        await supabase.from('borrowers')
+          .update({ borrower_status: 'submitted' })
+          .eq('id', borrower.id);
+
+        setUploadSuccess(
+          `Got it! We extracted $${totalLiquidity.toLocaleString()} in liquidity across ${accounts.length} account(s). ` +
+          `Your broker will review your statements and follow up shortly with your pre-approval.`
+        );
+
+        await loadData();
+      } catch (analysisErr) {
+        // Files are already stored — never show the borrower an analysis error.
+        console.error('Bank statement analysis failed; falling back to manual review:', analysisErr);
+        await fallBackToManualReview(borrower.id, uploadedFileNames);
       }
-
-      if (accounts.length === 0) {
-        // Check document processing status for a better error message
-        const { data: docs } = await supabase
-          .from('uploaded_documents')
-          .select('processing_status, error_message')
-          .eq('intake_submission_id', submissionId);
-        const failedDocs = docs?.filter(d => d.processing_status === 'failed');
-        const errorDetail = failedDocs?.map(d => d.error_message).filter(Boolean).join('; ');
-        throw new Error(errorDetail || 'Could not extract data from your bank statements. Please ensure you upload clear PDF or image files.');
-      }
-
-      // 5. Compute liquidity from extracted accounts
-      const totalLiquidity = accounts.reduce((sum, a) => sum + (Number(a.closing_balance) || 0), 0);
-      const avgConfidence = accounts.reduce((sum, a) => sum + (Number(a.confidence) || 0), 0) / accounts.length;
-
-      // Update borrower financial profile
-      await supabase.from('borrower_financial_profiles').upsert({
-        borrower_id: borrower.id,
-        liquidity_estimate: totalLiquidity,
-        ending_balance_avg: totalLiquidity / accounts.length,
-        avg_monthly_deposits: accounts.reduce((sum, a) => sum + (Number(a.total_deposits) || 0), 0) / accounts.length,
-        confidence_score: Math.round(avgConfidence * 100),
-        summary: {
-          source: 'ai_extraction',
-          extractions: accounts.map(a => ({
-            bank: a.bank_name,
-            holder: a.account_holder_name,
-            closing_balance: a.closing_balance,
-            deposits: a.total_deposits,
-            withdrawals: a.total_withdrawals,
-          })),
-          total_liquidity: totalLiquidity,
-          verified_at: new Date().toISOString(),
-        },
-      }, { onConflict: 'borrower_id' });
-
-      // Manual-upload borrowers do NOT get auto-generated pre-approvals.
-      // The broker reviews the extracted statements and finalizes a
-      // pre-approval manually. The dashboard surfaces these with a
-      // "Pending Pre-approval" badge.
-      await supabase.from('borrowers')
-        .update({ borrower_status: 'submitted' })
-        .eq('id', borrower.id);
-
-      setUploadSuccess(
-        `Got it! We extracted $${totalLiquidity.toLocaleString()} in liquidity across ${accounts.length} account(s). ` +
-        `Your broker will review your statements and follow up shortly with your pre-approval.`
-      );
-
-      await loadData();
     } catch (err: unknown) {
+      // Only reaches here if the upload itself (storage/DB) failed — the file
+      // was NOT saved, so the borrower genuinely needs to retry.
       console.error('Bank statement upload error:', err);
       const message = err instanceof Error ? err.message
         : typeof err === 'object' && err !== null && 'message' in err ? String((err as { message: unknown }).message)
-        : 'Upload or analysis failed. Please try again or contact your broker.';
+        : 'Upload failed. Please try again or contact your broker.';
       setError(message);
     } finally {
       setUploadLoading(false);
