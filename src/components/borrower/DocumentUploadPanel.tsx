@@ -86,7 +86,7 @@ export function DocumentUploadPanel({ borrowerId, borrowerType = 'personal', onU
 
       try {
         const { error: uploadError } = await supabase.storage
-          .from('documents')
+          .from('borrower-documents')
           .upload(filePath, file.file);
 
         if (uploadError) throw uploadError;
