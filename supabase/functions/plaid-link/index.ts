@@ -278,6 +278,7 @@ serve(async (req) => {
         .maybeSingle()
 
       let status = borrower?.plaid_report_status || null
+      let statusDetail: string | null = null
 
       if ((status === 'pending' || !status) && borrower?.plaid_user_id) {
         try {
@@ -406,13 +407,24 @@ serve(async (req) => {
           if (msg.includes('NOT_READY') || msg.includes('not ready') || msg.includes('PENDING')) {
             // genuinely still generating
           } else {
-            console.warn('Direct Plaid report fetch failed:', msg)
+            // Terminal Plaid error (user/item/report failure). Leaving the
+            // status "pending" strands the borrower on an infinite spinner —
+            // mark it errored so the UI tells them to reconnect or upload
+            // statements instead.
+            console.warn('Direct Plaid report fetch failed terminally:', msg)
+            status = 'error'
+            statusDetail = msg
+            await serviceClient
+              .from('borrowers')
+              .update({ plaid_report_status: 'error' })
+              .eq('id', borrower.id)
           }
         }
       }
 
       return new Response(JSON.stringify({
         status,
+        ...(statusDetail ? { detail: statusDetail } : {}),
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
