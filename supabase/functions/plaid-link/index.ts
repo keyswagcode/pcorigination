@@ -103,6 +103,135 @@ function splitName(borrowerName: string | null, fallbackFirst?: string | null, f
   }
 }
 
+// Fetch the borrower's CRA base report from Plaid and persist liquidity,
+// income, DTI, status, and auto pre-approvals. Shared by the user-facing
+// get_report_status poll AND the sweep_pending cron, so the store logic lives
+// in exactly one place. Returns the resolved status.
+// deno-lint-ignore no-explicit-any
+async function processBorrowerReport(serviceClient: any, borrower: { id: string; plaid_user_id: string }): Promise<{ status: string; detail?: string }> {
+  try {
+    const reportData = await plaidRequest('/cra/check_report/base_report/get', {
+      user_id: borrower.plaid_user_id,
+    })
+    const report = reportData.report || reportData
+
+    let totalLiquidity = 0
+    const items = (report?.items || []) as Array<Record<string, unknown>>
+    for (const item of items) {
+      const accounts = (item.accounts || []) as Array<Record<string, unknown>>
+      for (const acct of accounts) {
+        if (acct.type === 'depository') {
+          const balances = (acct.balances || {}) as Record<string, number | null>
+          const balance = balances.current ?? balances.available ?? 0
+          totalLiquidity += Number(balance) || 0
+        }
+      }
+    }
+
+    const income = computeQualifyingIncome(report)
+
+    const { data: existingProf } = await serviceClient
+      .from('borrower_financial_profiles')
+      .select('monthly_debt')
+      .eq('borrower_id', borrower.id)
+      .maybeSingle()
+    const monthlyDebt = Number((existingProf as { monthly_debt?: number } | null)?.monthly_debt) || 0
+    const dti = (income.monthlyIncome > 0 && monthlyDebt > 0)
+      ? Math.round((monthlyDebt / income.monthlyIncome) * 1000) / 10
+      : null
+
+    await serviceClient.from('borrower_financial_profiles').upsert({
+      borrower_id: borrower.id,
+      liquidity_estimate: totalLiquidity,
+      ending_balance_avg: totalLiquidity,
+      monthly_income: income.monthlyIncome,
+      income_estimate: income.annualIncome,
+      income_method: 'plaid_cra_qualifying',
+      income_months: income.monthsCovered,
+      ...(dti != null ? { dti, dti_computed_at: new Date().toISOString() } : {}),
+      confidence_score: 95,
+      summary: {
+        source: 'plaid_cra_base_report',
+        verified_at: new Date().toISOString(),
+        total_liquidity: totalLiquidity,
+        monthly_income: income.monthlyIncome,
+        income_months: income.monthsCovered,
+        report,
+      },
+    }, { onConflict: 'borrower_id' })
+
+    await serviceClient
+      .from('borrowers')
+      .update({
+        plaid_report_status: 'ready',
+        lifecycle_stage: totalLiquidity > 0 ? 'pre_approved' : 'liquidity_verified',
+        ...(totalLiquidity > 0 ? { borrower_status: 'prequalified' } : {}),
+      })
+      .eq('id', borrower.id)
+
+    if (totalLiquidity > 0) {
+      try {
+        await serviceClient.from('pre_approvals').delete().eq('borrower_id', borrower.id)
+        await serviceClient.from('pre_approvals').insert([
+          {
+            borrower_id: borrower.id,
+            loan_type: 'dscr',
+            status: 'approved',
+            sub_status: 'pre_approved',
+            prequalified_amount: totalLiquidity * 4,
+            qualification_max: totalLiquidity * 4,
+            verified_liquidity: totalLiquidity,
+            passes_liquidity_check: true,
+            summary: `DSCR Loan Pre-Approval: Up to $${(totalLiquidity * 4).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (4x multiplier)`,
+            machine_decision: 'approved',
+            machine_confidence: 95,
+          },
+          {
+            borrower_id: borrower.id,
+            loan_type: 'fix_flip',
+            status: 'approved',
+            sub_status: 'pre_approved',
+            prequalified_amount: totalLiquidity * 10,
+            qualification_max: totalLiquidity * 10,
+            verified_liquidity: totalLiquidity,
+            passes_liquidity_check: true,
+            summary: `Fix & Flip Pre-Approval: Up to $${(totalLiquidity * 10).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (10x multiplier)`,
+            machine_decision: 'approved',
+            machine_confidence: 95,
+          },
+          {
+            borrower_id: borrower.id,
+            loan_type: 'bridge',
+            status: 'approved',
+            sub_status: 'pre_approved',
+            prequalified_amount: totalLiquidity * 5,
+            qualification_max: totalLiquidity * 5,
+            verified_liquidity: totalLiquidity,
+            passes_liquidity_check: true,
+            summary: `Bridge Loan Pre-Approval: Up to $${(totalLiquidity * 5).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (5x multiplier)`,
+            machine_decision: 'approved',
+            machine_confidence: 95,
+          },
+        ])
+      } catch (paErr) {
+        console.warn('Auto pre_approval insert failed (status still ready):', (paErr as Error).message)
+      }
+    }
+    return { status: 'ready' }
+  } catch (err) {
+    const msg = (err as Error).message || ''
+    if (msg.includes('NOT_READY') || msg.includes('not ready') || msg.includes('PENDING')) {
+      return { status: 'pending' }
+    }
+    console.warn('Direct Plaid report fetch failed terminally:', msg)
+    await serviceClient
+      .from('borrowers')
+      .update({ plaid_report_status: 'error' })
+      .eq('id', borrower.id)
+    return { status: 'error', detail: msg }
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -113,6 +242,33 @@ serve(async (req) => {
       SUPABASE_URL,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
+
+    const body = await req.json().catch(() => ({}))
+    const { action } = body
+
+    // SWEEP PENDING — invoked by the recovery cron, not a user. Re-checks every
+    // borrower stuck in plaid_report_status='pending' (e.g. a missed webhook)
+    // and resolves them to ready/error. Unauthenticated like the other internal
+    // crons in this project: it takes no input and returns no PII, only counts;
+    // the worst an external caller can do is trigger Plaid re-checks already
+    // owed to pending borrowers.
+    if (action === 'sweep_pending') {
+      const { data: pending } = await serviceClient
+        .from('borrowers')
+        .select('id, plaid_user_id')
+        .eq('plaid_report_status', 'pending')
+        .not('plaid_user_id', 'is', null)
+      let ready = 0, errored = 0, stillPending = 0
+      for (const b of (pending || []) as Array<{ id: string; plaid_user_id: string }>) {
+        const r = await processBorrowerReport(serviceClient, b)
+        if (r.status === 'ready') ready++
+        else if (r.status === 'error') errored++
+        else stillPending++
+      }
+      return new Response(JSON.stringify({ swept: (pending || []).length, ready, errored, stillPending }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
@@ -129,8 +285,6 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-
-    const { action } = await req.json()
 
     // CREATE LINK TOKEN (also creates a Plaid user if one doesn't exist yet)
     if (action === 'create_link_token') {
@@ -281,145 +435,9 @@ serve(async (req) => {
       let statusDetail: string | null = null
 
       if ((status === 'pending' || !status) && borrower?.plaid_user_id) {
-        try {
-          const reportData = await plaidRequest('/cra/check_report/base_report/get', {
-            user_id: borrower.plaid_user_id,
-          })
-          const report = reportData.report || reportData
-
-          // Compute liquidity from depository accounts
-          let totalLiquidity = 0
-          const items = (report?.items || []) as Array<Record<string, unknown>>
-          for (const item of items) {
-            const accounts = (item.accounts || []) as Array<Record<string, unknown>>
-            for (const acct of accounts) {
-              if (acct.type === 'depository') {
-                const balances = (acct.balances || {}) as Record<string, number | null>
-                const balance = balances.current ?? balances.available ?? 0
-                totalLiquidity += Number(balance) || 0
-              }
-            }
-          }
-
-          // Qualifying monthly income from the CRA transactions (drives DTI).
-          const income = computeQualifyingIncome(report)
-
-          // If a credit pull already recorded monthly debt, recompute back-end
-          // DTI now that we have income.
-          const { data: existingProf } = await serviceClient
-            .from('borrower_financial_profiles')
-            .select('monthly_debt')
-            .eq('borrower_id', borrower.id)
-            .maybeSingle()
-          const monthlyDebt = Number((existingProf as { monthly_debt?: number } | null)?.monthly_debt) || 0
-          const dti = (income.monthlyIncome > 0 && monthlyDebt > 0)
-            ? Math.round((monthlyDebt / income.monthlyIncome) * 1000) / 10
-            : null
-
-          // Step 1: persist the report + flip status to ready FIRST. Do this
-          // before anything else so a downstream pre_approvals insert failure
-          // can never strand the borrower in 'pending' forever.
-          await serviceClient.from('borrower_financial_profiles').upsert({
-            borrower_id: borrower.id,
-            liquidity_estimate: totalLiquidity,
-            ending_balance_avg: totalLiquidity,
-            monthly_income: income.monthlyIncome,
-            income_estimate: income.annualIncome,
-            income_method: 'plaid_cra_qualifying',
-            income_months: income.monthsCovered,
-            ...(dti != null ? { dti, dti_computed_at: new Date().toISOString() } : {}),
-            confidence_score: 95,
-            summary: {
-              source: 'plaid_cra_base_report',
-              verified_at: new Date().toISOString(),
-              total_liquidity: totalLiquidity,
-              monthly_income: income.monthlyIncome,
-              income_months: income.monthsCovered,
-              report,
-            },
-          }, { onConflict: 'borrower_id' })
-
-          await serviceClient
-            .from('borrowers')
-            .update({
-              plaid_report_status: 'ready',
-              lifecycle_stage: totalLiquidity > 0 ? 'pre_approved' : 'liquidity_verified',
-              ...(totalLiquidity > 0 ? { borrower_status: 'prequalified' } : {}),
-            })
-            .eq('id', borrower.id)
-
-          status = 'ready'
-
-          // Step 2: best-effort pre-approval generation. Wrapped separately
-          // so any constraint failure here doesn't bubble out and cause the
-          // caller to keep polling.
-          if (totalLiquidity > 0) {
-            try {
-              await serviceClient.from('pre_approvals').delete().eq('borrower_id', borrower.id)
-              await serviceClient.from('pre_approvals').insert([
-                {
-                  borrower_id: borrower.id,
-                  loan_type: 'dscr',
-                  status: 'approved',
-                  sub_status: 'pre_approved',
-                  prequalified_amount: totalLiquidity * 4,
-                  qualification_max: totalLiquidity * 4,
-                  verified_liquidity: totalLiquidity,
-                  passes_liquidity_check: true,
-                  summary: `DSCR Loan Pre-Approval: Up to $${(totalLiquidity * 4).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (4x multiplier)`,
-                  machine_decision: 'approved',
-                  machine_confidence: 95,
-                },
-                {
-                  borrower_id: borrower.id,
-                  loan_type: 'fix_flip',
-                  status: 'approved',
-                  sub_status: 'pre_approved',
-                  prequalified_amount: totalLiquidity * 10,
-                  qualification_max: totalLiquidity * 10,
-                  verified_liquidity: totalLiquidity,
-                  passes_liquidity_check: true,
-                  summary: `Fix & Flip Pre-Approval: Up to $${(totalLiquidity * 10).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (10x multiplier)`,
-                  machine_decision: 'approved',
-                  machine_confidence: 95,
-                },
-                {
-                  borrower_id: borrower.id,
-                  loan_type: 'bridge',
-                  status: 'approved',
-                  sub_status: 'pre_approved',
-                  prequalified_amount: totalLiquidity * 5,
-                  qualification_max: totalLiquidity * 5,
-                  verified_liquidity: totalLiquidity,
-                  passes_liquidity_check: true,
-                  summary: `Bridge Loan Pre-Approval: Up to $${(totalLiquidity * 5).toLocaleString()} based on $${totalLiquidity.toLocaleString()} verified liquidity (5x multiplier)`,
-                  machine_decision: 'approved',
-                  machine_confidence: 95,
-                },
-              ])
-            } catch (paErr) {
-              console.warn('Auto pre_approval insert failed (status still ready):', (paErr as Error).message)
-            }
-          }
-        } catch (err) {
-          // PRODUCT_NOT_READY etc. — keep status as pending so polling continues.
-          const msg = (err as Error).message || ''
-          if (msg.includes('NOT_READY') || msg.includes('not ready') || msg.includes('PENDING')) {
-            // genuinely still generating
-          } else {
-            // Terminal Plaid error (user/item/report failure). Leaving the
-            // status "pending" strands the borrower on an infinite spinner —
-            // mark it errored so the UI tells them to reconnect or upload
-            // statements instead.
-            console.warn('Direct Plaid report fetch failed terminally:', msg)
-            status = 'error'
-            statusDetail = msg
-            await serviceClient
-              .from('borrowers')
-              .update({ plaid_report_status: 'error' })
-              .eq('id', borrower.id)
-          }
-        }
+        const result = await processBorrowerReport(serviceClient, { id: borrower.id, plaid_user_id: borrower.plaid_user_id })
+        if (result.status !== 'pending') status = result.status
+        statusDetail = result.detail ?? null
       }
 
       return new Response(JSON.stringify({
