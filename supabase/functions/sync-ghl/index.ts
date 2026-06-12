@@ -159,6 +159,7 @@ const LOAN_TYPE_LABELS: Record<string, string> = {
   bridge: 'Bridge',
   ground_up: 'Ground-Up Construction',
   bank_statement: 'Bank Statement',
+  commercial: 'Commercial',
 }
 
 serve(async (req) => {
@@ -195,6 +196,36 @@ serve(async (req) => {
 
     const body = await req.json()
     const { action, borrower_id, loan_id } = body
+
+    // Staff-only: enumerate the GHL location's users so admins can populate
+    // user_accounts.ghl_user_id when email matching fails.
+    if (action === 'list_ghl_users') {
+      const { data: acct } = await serviceClient
+        .from('user_accounts')
+        .select('user_role')
+        .eq('id', user.id)
+        .maybeSingle()
+      if (!acct || !['admin', 'reviewer'].includes(acct.user_role || '')) {
+        return new Response(JSON.stringify({ error: 'Forbidden' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const { ok, data, raw } = await ghlRequest('GET', `/users/?locationId=${encodeURIComponent(locationId)}`)
+      if (!ok || !data) {
+        return new Response(JSON.stringify({ error: `GHL users fetch failed: ${raw.slice(0, 200)}` }), {
+          status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const users = ((data as GhlUsersResponse).users || []).map((u) => ({
+        id: u.id,
+        email: u.email,
+        name: (u as Record<string, unknown>).name,
+      }))
+      return new Response(JSON.stringify({ users }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     if (!borrower_id) {
       return new Response(JSON.stringify({ error: 'Missing borrower_id' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -226,17 +257,21 @@ serve(async (req) => {
       })
     }
 
+    // Owner assignment: explicit user_accounts.ghl_user_id mapping wins;
+    // fall back to matching the broker's email against GHL location users.
     let brokerEmail: string | null = null
+    let mappedGhlUserId: string | null = null
     if (borrower.broker_id) {
       const { data: broker } = await serviceClient
         .from('user_accounts')
-        .select('email')
+        .select('email, ghl_user_id')
         .eq('id', borrower.broker_id)
         .maybeSingle()
       brokerEmail = broker?.email || null
+      mappedGhlUserId = (broker?.ghl_user_id as string | null) || null
     }
 
-    const ghlUserId = brokerEmail ? await findGhlUserIdByEmail(locationId, brokerEmail) : null
+    const ghlUserId = mappedGhlUserId || (brokerEmail ? await findGhlUserIdByEmail(locationId, brokerEmail) : null)
 
     const nameParts = (borrower.borrower_name || '').trim().split(/\s+/)
     const firstName = nameParts[0] || ''

@@ -9,6 +9,7 @@ import {
   type CommercialIntake,
 } from '../../shared/commercialIntake';
 import { downloadCommercialIntakePdf, commercialIntakePdfBase64, type CommercialIntakeMeta } from '../../lib/commercialIntakeGenerator';
+import { syncLoanCreatedToGhl } from '../../services/ghlSyncService';
 
 export default function BorrowerCommercialIntakePage() {
   const { user } = useAuth();
@@ -89,7 +90,9 @@ export default function BorrowerCommercialIntakePage() {
         status: 'submitted',
       }).select('id').single();
       if (insErr) throw insErr;
-      void data;
+      // CRM: update the GHL contact and open an opportunity for this loan.
+      // Fire-and-forget — CRM lag must never block the borrower flow.
+      if (data?.id) syncLoanCreatedToGhl(borrowerId, data.id);
       setSubmitted(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
