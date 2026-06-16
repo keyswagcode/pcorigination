@@ -9,8 +9,13 @@ import { generatePreApprovalPdf, fetchOrgBrandingForBorrower } from '../../lib/p
 import { Urla1003DetailsForm } from '../../components/borrower/Urla1003DetailsForm';
 import {
   Building2, CheckCircle2, DollarSign, Plus, Download,
-  Shield, Banknote, FileText, ArrowRight, Loader2, AlertCircle
+  Shield, Banknote, FileText, ArrowRight, Loader2, AlertCircle, ExternalLink, Gauge
 } from 'lucide-react';
+
+// ISC / MeridianLink SmartPay self-service link. A borrower who runs their own
+// credit here triggers a SOFT pull (no impact to their score); the results flow
+// to the broker on the back end.
+const SELF_CREDIT_PULL_URL = 'https://iscsite.meridianlink.com/smartpay/SmartPay.aspx?uid=2a0fe0a6f97449a1a907a138008c1207';
 
 interface BorrowerData {
   id: string;
@@ -56,6 +61,7 @@ export function BorrowerHomePage() {
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
   const [llcName, setLlcName] = useState('');
   const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [creditPullStarted, setCreditPullStarted] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -216,6 +222,22 @@ export function BorrowerHomePage() {
     setError(null);
     setPlaidLoading(true);
     openPlaid();
+  };
+
+  // Remember (client-side only) that the borrower launched the self-service
+  // credit pull, so the card reflects it on return. No DB write — borrowers
+  // can't write borrower_activity_log, and the soft-pull results reach the
+  // broker through ISC on the back end regardless.
+  useEffect(() => {
+    if (borrower && localStorage.getItem(`credit_pull_started_${borrower.id}`) === '1') {
+      setCreditPullStarted(true);
+    }
+  }, [borrower]);
+
+  const handleSelfCreditPull = () => {
+    if (borrower) localStorage.setItem(`credit_pull_started_${borrower.id}`, '1');
+    setCreditPullStarted(true);
+    window.open(SELF_CREDIT_PULL_URL, '_blank', 'noopener,noreferrer');
   };
 
   // PDF upload handler
@@ -699,6 +721,50 @@ export function BorrowerHomePage() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Optional: Run Your Own Credit (soft pull) */}
+      <div className={`mb-6 border rounded-xl overflow-hidden ${creditPullStarted ? 'border-teal-200 bg-teal-50/30' : 'border-gray-200 bg-white'}`}>
+        <div className="px-6 py-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${creditPullStarted ? 'bg-teal-100' : 'bg-gray-100'}`}>
+                {creditPullStarted
+                  ? <CheckCircle2 className="w-5 h-5 text-teal-600" />
+                  : <Gauge className="w-5 h-5 text-gray-500" />}
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Run Your Credit <span className="text-sm font-normal text-gray-400">· Optional</span></h2>
+                <p className="text-sm text-gray-500">
+                  {creditPullStarted
+                    ? 'Credit pull started — your broker will see the results automatically.'
+                    : 'Pull your own credit in a couple of minutes to speed up your approval.'}
+                </p>
+              </div>
+            </div>
+            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-full border border-green-100">
+              <Shield className="w-3 h-3" /> Soft pull — won't affect your score
+            </span>
+          </div>
+
+          <div className="mt-4 px-4 py-3 bg-green-50 border border-green-100 rounded-lg text-sm text-green-800 flex items-start gap-2 sm:hidden">
+            <Shield className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            This is a <strong>soft pull</strong> — it will <strong>not</strong> affect your credit score.
+          </div>
+
+          <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <button
+              onClick={handleSelfCreditPull}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" />
+              {creditPullStarted ? 'Open Credit Form Again' : 'Run My Credit'}
+            </button>
+            <p className="text-xs text-gray-500">
+              Opens our secure credit partner (ISC / MeridianLink) in a new tab. Your results are sent straight to your broker.
+            </p>
+          </div>
         </div>
       </div>
 
