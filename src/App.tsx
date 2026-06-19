@@ -1,40 +1,66 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, lazy, Suspense, type ComponentType } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TeamProvider } from './components/team/TeamContext';
 import { LoginPage } from './components/auth/LoginPage';
 import { BorrowerLayout } from './layouts/BorrowerLayout';
 import { InternalLayout } from './layouts/InternalLayout';
 
+// Lazy import that self-heals across deploys. When we ship a new build, chunk
+// filenames change; a client still holding the previous index.html requests an
+// old chunk name that no longer exists. Our SPA rewrite serves index.html for
+// it (HTML, not JS), so the dynamic import rejects — and without this the
+// Suspense fallback would spin forever ("load circle of death"). On the first
+// such failure we force ONE full reload to fetch the fresh index + new chunks;
+// a short sessionStorage guard prevents a reload loop on a genuine error.
+// deno-lint-ignore no-explicit-any
+function lazyWithReload<T extends ComponentType<any>>(factory: () => Promise<{ default: T }>) {
+  return lazy(async () => {
+    try {
+      return await factory();
+    } catch (err) {
+      const KEY = 'chunk_reload_at';
+      const last = Number(sessionStorage.getItem(KEY) || '0');
+      if (Date.now() - last > 15000) {
+        sessionStorage.setItem(KEY, String(Date.now()));
+        window.location.reload();
+        // Never resolve — let the reload take over before anything renders.
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw err;
+    }
+  });
+}
+
 // Routes are lazy-loaded so the initial bundle isn't one ~1.3 MB chunk that
 // loads every portal + jsPDF/html2canvas up front. Each page (and its heavy
 // deps) is fetched on demand. Named exports are mapped to default for lazy().
-const BorrowerHomePage = lazy(() => import('./pages/borrower/BorrowerHomePage').then(m => ({ default: m.BorrowerHomePage })));
-const NewLoanPage = lazy(() => import('./pages/borrower/NewLoanPage').then(m => ({ default: m.NewLoanPage })));
-const BorrowerCommercialIntakePage = lazy(() => import('./pages/borrower/BorrowerCommercialIntakePage'));
-const BorrowerQueuePage = lazy(() => import('./pages/internal/BorrowerQueuePage').then(m => ({ default: m.BorrowerQueuePage })));
-const BorrowerFilePage = lazy(() => import('./pages/internal/BorrowerFilePage').then(m => ({ default: m.BorrowerFilePage })));
-const InternalPlacerBotPage = lazy(() => import('./pages/internal/InternalPlacerBotPage').then(m => ({ default: m.InternalPlacerBotPage })));
-const AllLoansPage = lazy(() => import('./pages/internal/AllLoansPage').then(m => ({ default: m.AllLoansPage })));
-const AllFilesPage = lazy(() => import('./pages/internal/AllFilesPage').then(m => ({ default: m.AllFilesPage })));
-const AllApplicationsPage = lazy(() => import('./pages/internal/AllApplicationsPage').then(m => ({ default: m.AllApplicationsPage })));
-const BorrowerApplyPage = lazy(() => import('./pages/BorrowerApplyPage').then(m => ({ default: m.BorrowerApplyPage })));
-const BorrowerDocumentsPage = lazy(() => import('./pages/borrower/BorrowerDocumentsPage').then(m => ({ default: m.BorrowerDocumentsPage })));
-const BorrowerLoansPage = lazy(() => import('./pages/borrower/BorrowerLoansPage').then(m => ({ default: m.BorrowerLoansPage })));
-const BorrowerProfilePage = lazy(() => import('./pages/borrower/BorrowerProfilePage').then(m => ({ default: m.BorrowerProfilePage })));
-const BorrowerLoanEditPage = lazy(() => import('./pages/borrower/BorrowerLoanEditPage').then(m => ({ default: m.BorrowerLoanEditPage })));
-const BrokerDashboardPage = lazy(() => import('./pages/broker/BrokerDashboardPage').then(m => ({ default: m.BrokerDashboardPage })));
-const BrokerBorrowersPage = lazy(() => import('./pages/broker/BrokerBorrowersPage').then(m => ({ default: m.BrokerBorrowersPage })));
-const BrokerBorrowerDetailPage = lazy(() => import('./pages/broker/BrokerBorrowerDetailPage').then(m => ({ default: m.BrokerBorrowerDetailPage })));
-const BrokerLoanReviewPage = lazy(() => import('./pages/broker/BrokerLoanReviewPage').then(m => ({ default: m.BrokerLoanReviewPage })));
-const BrokerSettingsPage = lazy(() => import('./pages/broker/BrokerSettingsPage').then(m => ({ default: m.BrokerSettingsPage })));
-const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage })));
-const CoBorrowerInvitePage = lazy(() => import('./pages/CoBorrowerInvitePage').then(m => ({ default: m.CoBorrowerInvitePage })));
-const BorrowerServicingPage = lazy(() => import('./pages/borrower/BorrowerServicingPage').then(m => ({ default: m.BorrowerServicingPage })));
-const BorrowerServicedLoanPage = lazy(() => import('./pages/borrower/BorrowerServicedLoanPage').then(m => ({ default: m.BorrowerServicedLoanPage })));
-const AdminServicingListPage = lazy(() => import('./pages/internal/AdminServicingListPage').then(m => ({ default: m.AdminServicingListPage })));
-const OnboardServicedLoanPage = lazy(() => import('./pages/internal/OnboardServicedLoanPage').then(m => ({ default: m.OnboardServicedLoanPage })));
-const AdminServicedLoanDetailPage = lazy(() => import('./pages/internal/AdminServicedLoanDetailPage').then(m => ({ default: m.AdminServicedLoanDetailPage })));
+const BorrowerHomePage = lazyWithReload(() => import('./pages/borrower/BorrowerHomePage').then(m => ({ default: m.BorrowerHomePage })));
+const NewLoanPage = lazyWithReload(() => import('./pages/borrower/NewLoanPage').then(m => ({ default: m.NewLoanPage })));
+const BorrowerCommercialIntakePage = lazyWithReload(() => import('./pages/borrower/BorrowerCommercialIntakePage'));
+const BorrowerQueuePage = lazyWithReload(() => import('./pages/internal/BorrowerQueuePage').then(m => ({ default: m.BorrowerQueuePage })));
+const BorrowerFilePage = lazyWithReload(() => import('./pages/internal/BorrowerFilePage').then(m => ({ default: m.BorrowerFilePage })));
+const InternalPlacerBotPage = lazyWithReload(() => import('./pages/internal/InternalPlacerBotPage').then(m => ({ default: m.InternalPlacerBotPage })));
+const AllLoansPage = lazyWithReload(() => import('./pages/internal/AllLoansPage').then(m => ({ default: m.AllLoansPage })));
+const AllFilesPage = lazyWithReload(() => import('./pages/internal/AllFilesPage').then(m => ({ default: m.AllFilesPage })));
+const AllApplicationsPage = lazyWithReload(() => import('./pages/internal/AllApplicationsPage').then(m => ({ default: m.AllApplicationsPage })));
+const BorrowerApplyPage = lazyWithReload(() => import('./pages/BorrowerApplyPage').then(m => ({ default: m.BorrowerApplyPage })));
+const BorrowerDocumentsPage = lazyWithReload(() => import('./pages/borrower/BorrowerDocumentsPage').then(m => ({ default: m.BorrowerDocumentsPage })));
+const BorrowerLoansPage = lazyWithReload(() => import('./pages/borrower/BorrowerLoansPage').then(m => ({ default: m.BorrowerLoansPage })));
+const BorrowerProfilePage = lazyWithReload(() => import('./pages/borrower/BorrowerProfilePage').then(m => ({ default: m.BorrowerProfilePage })));
+const BorrowerLoanEditPage = lazyWithReload(() => import('./pages/borrower/BorrowerLoanEditPage').then(m => ({ default: m.BorrowerLoanEditPage })));
+const BrokerDashboardPage = lazyWithReload(() => import('./pages/broker/BrokerDashboardPage').then(m => ({ default: m.BrokerDashboardPage })));
+const BrokerBorrowersPage = lazyWithReload(() => import('./pages/broker/BrokerBorrowersPage').then(m => ({ default: m.BrokerBorrowersPage })));
+const BrokerBorrowerDetailPage = lazyWithReload(() => import('./pages/broker/BrokerBorrowerDetailPage').then(m => ({ default: m.BrokerBorrowerDetailPage })));
+const BrokerLoanReviewPage = lazyWithReload(() => import('./pages/broker/BrokerLoanReviewPage').then(m => ({ default: m.BrokerLoanReviewPage })));
+const BrokerSettingsPage = lazyWithReload(() => import('./pages/broker/BrokerSettingsPage').then(m => ({ default: m.BrokerSettingsPage })));
+const ResetPasswordPage = lazyWithReload(() => import('./pages/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage })));
+const CoBorrowerInvitePage = lazyWithReload(() => import('./pages/CoBorrowerInvitePage').then(m => ({ default: m.CoBorrowerInvitePage })));
+const BorrowerServicingPage = lazyWithReload(() => import('./pages/borrower/BorrowerServicingPage').then(m => ({ default: m.BorrowerServicingPage })));
+const BorrowerServicedLoanPage = lazyWithReload(() => import('./pages/borrower/BorrowerServicedLoanPage').then(m => ({ default: m.BorrowerServicedLoanPage })));
+const AdminServicingListPage = lazyWithReload(() => import('./pages/internal/AdminServicingListPage').then(m => ({ default: m.AdminServicingListPage })));
+const OnboardServicedLoanPage = lazyWithReload(() => import('./pages/internal/OnboardServicedLoanPage').then(m => ({ default: m.OnboardServicedLoanPage })));
+const AdminServicedLoanDetailPage = lazyWithReload(() => import('./pages/internal/AdminServicedLoanDetailPage').then(m => ({ default: m.AdminServicedLoanDetailPage })));
 
 function RouteFallback() {
   return (
