@@ -103,6 +103,37 @@ function splitName(borrowerName: string | null, fallbackFirst?: string | null, f
   }
 }
 
+// Keep only what we persist + later re-read: depository accounts and the
+// transaction fields the income estimator uses. A full CRA report with several
+// linked banks and 24 months of transactions is huge; storing it whole in the
+// profile.summary jsonb on every poll made multi-account upserts slow enough to
+// time out. This slims it to the essentials (liquidity + income re-computation)
+// without changing what the broker UI shows.
+// deno-lint-ignore no-explicit-any
+function slimReport(report: any): Record<string, unknown> {
+  const items = (report?.items || []) as Array<Record<string, unknown>>
+  return {
+    items: items.map((item) => ({
+      accounts: ((item.accounts || []) as Array<Record<string, unknown>>)
+        .filter((a) => a.type === 'depository')
+        .map((a) => ({
+          type: a.type,
+          subtype: a.subtype,
+          name: a.name,
+          balances: a.balances,
+          transactions: ((a.transactions || []) as Array<Record<string, unknown>>).map((t) => ({
+            date: t.date,
+            amount: t.amount,
+            name: t.name,
+            credit_category: t.credit_category,
+            personal_finance_category: t.personal_finance_category,
+            category: t.category,
+          })),
+        })),
+    })),
+  }
+}
+
 // Fetch the borrower's CRA base report from Plaid and persist liquidity,
 // income, DTI, status, and auto pre-approvals. Shared by the user-facing
 // get_report_status poll AND the sweep_pending cron, so the store logic lives
@@ -156,7 +187,7 @@ async function processBorrowerReport(serviceClient: any, borrower: { id: string;
         total_liquidity: totalLiquidity,
         monthly_income: income.monthlyIncome,
         income_months: income.monthsCovered,
-        report,
+        report: slimReport(report),
       },
     }, { onConflict: 'borrower_id' })
 
