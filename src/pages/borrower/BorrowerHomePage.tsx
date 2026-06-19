@@ -62,6 +62,7 @@ export function BorrowerHomePage() {
   const [llcName, setLlcName] = useState('');
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [creditPullStarted, setCreditPullStarted] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -152,13 +153,15 @@ export function BorrowerHomePage() {
   });
 
   // Poll for Plaid Check report readiness while pending. First check runs
-  // immediately in case the webhook already landed, then every 3s. Times
-  // out after 2 minutes so the spinner doesn't run forever.
+  // immediately in case the webhook already landed, then every 5s. CRA reports
+  // aggregate every linked institution and don't finish until the slowest one
+  // does, so a borrower who connects several banks legitimately needs longer —
+  // we wait up to 5 minutes before handing off to the background sweep.
   useEffect(() => {
     if (!reportPending) return;
     let cancelled = false;
     const startedAt = Date.now();
-    const TIMEOUT_MS = 2 * 60 * 1000;
+    const TIMEOUT_MS = 5 * 60 * 1000;
 
     const check = async () => {
       try {
@@ -192,7 +195,10 @@ export function BorrowerHomePage() {
       if (Date.now() - startedAt > TIMEOUT_MS) {
         if (!cancelled) {
           setReportPending(false);
-          setError('The bank report is taking longer than expected. Refresh in a minute or try reconnecting.');
+          // Not a failure — connecting several banks just takes a while. We keep
+          // finishing it in the background (a sweep runs every few minutes), so
+          // tell the borrower it's still in progress rather than alarming them.
+          setUploadSuccess('Your bank report is still generating in the background — this can take a few minutes when several accounts are connected. You can leave this page; check back shortly and your pre-approval will be ready.');
         }
         return true;
       }
@@ -203,7 +209,7 @@ export function BorrowerHomePage() {
     const interval = setInterval(async () => {
       const done = await check();
       if (done) clearInterval(interval);
-    }, 3000);
+    }, 5000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [reportPending, borrower, loadData]);
 
@@ -241,7 +247,6 @@ export function BorrowerHomePage() {
   };
 
   // PDF upload handler
-  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
   // Once statements are safely stored, automated extraction failing must never
   // surface as an error — the files are kept and a human reviews them instead.

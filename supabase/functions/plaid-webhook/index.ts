@@ -135,6 +135,34 @@ function extractLiquidity(report: Record<string, unknown>): number {
   return total
 }
 
+// Mirror plaid-link's slimReport: store only depository accounts + the
+// transaction fields the income estimator needs, so multi-bank reports don't
+// bloat the profile.summary jsonb (a whole CRA report can be very large).
+// deno-lint-ignore no-explicit-any
+function slimReport(report: any): Record<string, unknown> {
+  const items = (report?.items || []) as Array<Record<string, unknown>>
+  return {
+    items: items.map((item) => ({
+      accounts: ((item.accounts || []) as Array<Record<string, unknown>>)
+        .filter((a) => a.type === 'depository')
+        .map((a) => ({
+          type: a.type,
+          subtype: a.subtype,
+          name: a.name,
+          balances: a.balances,
+          transactions: ((a.transactions || []) as Array<Record<string, unknown>>).map((t) => ({
+            date: t.date,
+            amount: t.amount,
+            name: t.name,
+            credit_category: t.credit_category,
+            personal_finance_category: t.personal_finance_category,
+            category: t.category,
+          })),
+        })),
+    })),
+  }
+}
+
 serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response('ok', { status: 200 })
@@ -388,7 +416,7 @@ serve(async (req) => {
         source: 'plaid_cra_base_report',
         verified_at: new Date().toISOString(),
         total_liquidity: totalLiquidity,
-        report,
+        report: slimReport(report),
       },
     }, { onConflict: 'borrower_id' })
 
