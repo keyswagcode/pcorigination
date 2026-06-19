@@ -766,9 +766,10 @@ export function BorrowerHomePage() {
               <ExternalLink className="w-4 h-4" />
               {creditPullStarted ? 'Open Credit Form Again' : 'Run My Credit'}
             </button>
-            <p className="text-xs text-gray-500">
-              Opens our secure credit partner (ISC / MeridianLink) in a new tab. Your results are sent straight to your broker.
-            </p>
+            <div className="text-xs text-gray-500">
+              <p>Opens our secure credit partner (ISC / MeridianLink) in a new tab. Your results are sent straight to your broker.</p>
+              <p className="mt-1 font-medium text-gray-600">There is a $65 charge to run your credit.</p>
+            </div>
           </div>
         </div>
       </div>
