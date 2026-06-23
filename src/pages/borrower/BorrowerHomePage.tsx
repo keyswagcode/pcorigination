@@ -683,11 +683,11 @@ export function BorrowerHomePage() {
                 )}
               </button>
 
-              {/* PDF Upload */}
+              {/* Statement Upload — accept ANY file type (PDFs, photos/screenshots
+                  of statements, etc.); never restrict at the picker. */}
               <label className={`flex flex-col items-center gap-3 p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-gray-400 hover:bg-gray-50 transition-all cursor-pointer ${uploadLoading ? 'opacity-50 pointer-events-none' : ''}`}>
                 <input
                   type="file"
-                  accept=".pdf"
                   multiple
                   onChange={handlePdfUpload}
                   className="hidden"
@@ -699,7 +699,7 @@ export function BorrowerHomePage() {
                 )}
                 <div className="text-center">
                   <p className="font-medium text-gray-900">Upload Bank Statements</p>
-                  <p className="text-xs text-gray-500 mt-1">PDF files, last 2-3 months</p>
+                  <p className="text-xs text-gray-500 mt-1">PDFs or photos, last 2-3 months</p>
                 </div>
                 <span className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">Manual Review</span>
               </label>
