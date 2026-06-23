@@ -29,7 +29,7 @@ export async function notifyLinkSuccess(): Promise<void> {
   await callPlaidFunction('link_success');
 }
 
-export async function getReportStatus(): Promise<'pending' | 'ready' | 'error' | null> {
+export async function getReportStatus(): Promise<{ status: 'pending' | 'ready' | 'error' | null; detail?: string }> {
   const data = await callPlaidFunction('get_report_status');
-  return data.status;
+  return { status: data.status, detail: data.detail };
 }
