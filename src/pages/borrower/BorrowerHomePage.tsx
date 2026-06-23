@@ -750,7 +750,7 @@ export function BorrowerHomePage() {
                 <h2 className="text-lg font-semibold text-gray-900">Run Your Credit <span className="text-sm font-normal text-gray-400">· Optional</span></h2>
                 <p className="text-sm text-gray-500">
                   {creditPullStarted
-                    ? 'Credit pull started — your broker will see the results automatically.'
+                    ? 'Credit pull started — your lender will see the results automatically.'
                     : 'Pull your own credit in a couple of minutes to speed up your approval.'}
                 </p>
               </div>
@@ -774,7 +774,7 @@ export function BorrowerHomePage() {
               {creditPullStarted ? 'Open Credit Form Again' : 'Run My Credit'}
             </button>
             <div className="text-xs text-gray-500">
-              <p>Opens our secure credit partner (ISC / MeridianLink) in a new tab. Your results are sent straight to your broker.</p>
+              <p>Opens our secure credit partner (ISC / MeridianLink) in a new tab. Your results are sent straight to your lender.</p>
               <p className="mt-1 font-medium text-gray-600">There is a $65 charge to run your credit.</p>
             </div>
           </div>
