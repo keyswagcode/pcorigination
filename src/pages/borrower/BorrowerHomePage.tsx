@@ -165,7 +165,7 @@ export function BorrowerHomePage() {
 
     const check = async () => {
       try {
-        const status = await getReportStatus();
+        const { status, detail } = await getReportStatus();
         if (cancelled) return false;
         if (status === 'ready') {
           const { data: profile } = await supabase
@@ -185,7 +185,14 @@ export function BorrowerHomePage() {
         } else if (status === 'error') {
           if (!cancelled) {
             setReportPending(false);
-            setError('Bank report failed to generate. Please try reconnecting.');
+            logError('plaid.report_error', detail || 'unknown', { borrowerId: borrower?.id });
+            // Most terminal CRA failures are the connected bank's data, not
+            // something reconnecting the same bank fixes — surface Plaid's
+            // reason and point to the alternatives (different bank, or upload
+            // statements, both available in this same step above).
+            setError(
+              `${detail || 'Your bank report could not be generated.'} You can try connecting a different bank, or upload your bank statements instead.`
+            );
           }
           return true;
         }
