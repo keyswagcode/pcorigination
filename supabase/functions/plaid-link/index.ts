@@ -254,6 +254,42 @@ async function processBorrowerReport(serviceClient: any, borrower: { id: string;
     if (msg.includes('NOT_READY') || msg.includes('not ready') || msg.includes('PENDING')) {
       return { status: 'pending' }
     }
+
+    // DATA_QUALITY_CHECK_FAILED — the bank returned inconsistent transaction
+    // history. Plaid's documented remediation is to regenerate a fresh report
+    // (/cra/check_report/create) with the latest bank data. Do it at most once
+    // per 24h per borrower (so a persistently-bad bank can't loop), then keep
+    // the borrower 'pending' so the poll + recovery sweep pick up the new
+    // report. If it already failed again within 24h, treat as terminal.
+    const isDataQuality = /DATA_QUALITY|inconsistent transaction|high chance of error|resolve issues/i.test(msg)
+    if (isDataQuality) {
+      const { data: b } = await serviceClient
+        .from('borrowers')
+        .select('plaid_report_regenerated_at')
+        .eq('id', borrower.id)
+        .maybeSingle()
+      const last = b?.plaid_report_regenerated_at ? new Date(b.plaid_report_regenerated_at).getTime() : 0
+      if (Date.now() - last > 24 * 60 * 60 * 1000) {
+        try {
+          await plaidRequest('/cra/check_report/create', {
+            user_id: borrower.plaid_user_id,
+            days_requested: 365,
+            consumer_report_permissible_purpose: 'WRITTEN_INSTRUCTION_PREQUALIFICATION',
+            webhook: PLAID_WEBHOOK_URL,
+          })
+          await serviceClient
+            .from('borrowers')
+            .update({ plaid_report_status: 'pending', plaid_report_regenerated_at: new Date().toISOString() })
+            .eq('id', borrower.id)
+          console.log('Regenerated CRA report after data-quality failure for', borrower.id)
+          return { status: 'pending' }
+        } catch (regenErr) {
+          console.warn('CRA report regenerate failed:', (regenErr as Error).message)
+          // fall through to terminal error
+        }
+      }
+    }
+
     console.warn('Direct Plaid report fetch failed terminally:', msg)
     await serviceClient
       .from('borrowers')
