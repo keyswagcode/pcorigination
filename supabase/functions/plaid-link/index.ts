@@ -251,7 +251,17 @@ async function processBorrowerReport(serviceClient: any, borrower: { id: string;
     return { status: 'ready' }
   } catch (err) {
     const msg = (err as Error).message || ''
-    if (msg.includes('NOT_READY') || msg.includes('not ready') || msg.includes('PENDING')) {
+    // Still generating. Plaid generates the base report ASYNC after the user
+    // finishes Link, so for a window right after a successful link
+    // base_report/get returns "report does not exist" (the report object isn't
+    // created yet) — that is transient, NOT a reason to tell the borrower to
+    // reconnect. Keep polling; the readiness/error webhook (or a later poll)
+    // resolves it. Genuine failures arrive as USER_CHECK_REPORT_ERROR (webhook
+    // → status 'error') or DATA_QUALITY (handled below).
+    if (
+      msg.includes('NOT_READY') || msg.includes('not ready') || msg.includes('PENDING') ||
+      msg.includes('does not exist') || msg.includes('reconnect')
+    ) {
       return { status: 'pending' }
     }
 
