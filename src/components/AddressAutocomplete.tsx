@@ -118,16 +118,117 @@ export function AddressAutocomplete({ value, onChange, onAddressSelected, placeh
     };
   }, [ready, onChange, onAddressSelected]);
 
+  // ── Built-in dropdown fallback (no key required) ──────────────────────────
+  // When Google Places isn't available (no key / API not enabled), suggest
+  // real addresses as the borrower types via Photon (OSM, CORS-enabled, free).
+  // On select we fill street/city/state/zip; the Census verify-on-submit that
+  // already runs standardizes and confirms the final address.
+  const [suggestions, setSuggestions] = useState<Array<ParsedAddress & { label: string }>>([]);
+  const [showList, setShowList] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const googleActive = ready; // Google widget attached; skip fallback UI
+
+  const STATE_ABBR: Record<string, string> = {
+    alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA', colorado: 'CO',
+    connecticut: 'CT', delaware: 'DE', florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID',
+    illinois: 'IL', indiana: 'IN', iowa: 'IA', kansas: 'KS', kentucky: 'KY', louisiana: 'LA',
+    maine: 'ME', maryland: 'MD', massachusetts: 'MA', michigan: 'MI', minnesota: 'MN',
+    mississippi: 'MS', missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV',
+    'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+    'north carolina': 'NC', 'north dakota': 'ND', ohio: 'OH', oklahoma: 'OK', oregon: 'OR',
+    pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC', 'south dakota': 'SD',
+    tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT', virginia: 'VA', washington: 'WA',
+    'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY', 'district of columbia': 'DC',
+  };
+  const toAbbr = (state: string) => STATE_ABBR[state.trim().toLowerCase()] || (state.length === 2 ? state.toUpperCase() : state);
+
+  const fetchSuggestions = (q: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (q.trim().length < 4) { setSuggestions([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&lang=en`);
+        if (!res.ok) return;
+        const data = await res.json() as { features?: Array<{ properties?: Record<string, string> }> };
+        // Preserve a house number the borrower already typed if the match lacks one.
+        const typedNum = (q.match(/^\s*(\d+[A-Za-z]?)\s+/) || [])[1] || '';
+        const seen = new Set<string>();
+        const items = (data.features || [])
+          .map(f => f.properties || {})
+          .filter(p => p.countrycode === 'US' && (p.street || p.name))
+          .map(p => {
+            const streetName = p.street || p.name || '';
+            const num = p.housenumber || typedNum;
+            const street = [num, streetName].filter(Boolean).join(' ');
+            const state = toAbbr(p.state || '');
+            const parsed: ParsedAddress & { label: string } = {
+              street,
+              city: p.city || p.district || '',
+              state,
+              zip: p.postcode || '',
+              label: `${street} — ${[p.city || p.district, state, p.postcode].filter(Boolean).join(', ')}`,
+            };
+            return parsed;
+          })
+          .filter(p => {
+            if (seen.has(p.label)) return false;
+            seen.add(p.label);
+            return true;
+          })
+          .slice(0, 5);
+        setSuggestions(items);
+        setShowList(items.length > 0);
+      } catch { /* suggestions are best-effort */ }
+    }, 300);
+  };
+
+  useEffect(() => {
+    const onClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setShowList(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
   return (
-    <input
-      ref={inputRef}
-      type="text"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      required={required}
-      autoComplete="street-address"
-      className={className}
-    />
+    <div ref={containerRef} className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={e => {
+          onChange(e.target.value);
+          if (!googleActive) fetchSuggestions(e.target.value);
+        }}
+        onFocus={() => { if (!googleActive && suggestions.length > 0) setShowList(true); }}
+        placeholder={placeholder}
+        required={required}
+        autoComplete="off"
+        className={className}
+      />
+      {!googleActive && showList && suggestions.length > 0 && (
+        <ul className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+          {suggestions.map((s, i) => (
+            <li key={i}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onChange(s.street);
+                  if (onAddressSelected) onAddressSelected({ street: s.street, city: s.city, state: s.state, zip: s.zip });
+                  setShowList(false);
+                  setSuggestions([]);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-800 hover:bg-teal-50"
+              >
+                {s.label}
+              </button>
+            </li>
+          ))}
+          <li className="px-4 py-1.5 text-[10px] text-gray-400 bg-gray-50">Address suggestions — pick one or keep typing</li>
+        </ul>
+      )}
+    </div>
   );
 }

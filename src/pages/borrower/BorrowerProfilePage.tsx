@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import type { Borrower, BorrowerPreviousAddress } from '../../shared/types';
 import { User, Building2, Save, Loader2, CheckCircle, FileText, UserPlus, Trash2, Send, Eye, EyeOff, Shield, Plus, Home } from 'lucide-react';
 import { verifyUsAddress } from '../../services/addressService';
+import { AddressAutocomplete } from '../../components/AddressAutocomplete';
 
 const LOAN_TYPES = [
   { value: 'bank_statement', label: 'Bank Statement', description: 'Use bank deposits to qualify instead of tax returns' },
@@ -373,10 +374,16 @@ export function BorrowerProfilePage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Residential Address *
               </label>
-              <input
-                type="text"
+              <AddressAutocomplete
                 value={(borrower as Record<string, unknown>).address_street as string || ''}
-                onChange={e => setBorrower({ ...borrower, address_street: e.target.value } as typeof borrower)}
+                onChange={street => setBorrower({ ...borrower, address_street: street } as typeof borrower)}
+                onAddressSelected={a => setBorrower({
+                  ...borrower,
+                  address_street: a.street,
+                  address_city: a.city || (borrower as Record<string, unknown>).address_city,
+                  address_state: a.state || (borrower as Record<string, unknown>).address_state,
+                  address_zip: a.zip || (borrower as Record<string, unknown>).address_zip,
+                } as typeof borrower)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 mb-2"
                 placeholder="Street address"
               />
