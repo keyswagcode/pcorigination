@@ -274,12 +274,27 @@ export function BorrowerHomePage() {
 
   // PDF upload handler
 
+  // Alert the borrower's AE that statements landed in the review queue.
+  // Fire-and-forget — never block the borrower flow on it.
+  const notifyAeOfReview = async (borrowerId: string, fileNames: string[], autoExtracted: boolean) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      void fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/notify-manual-review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({ borrower_id: borrowerId, file_names: fileNames, auto_extracted: autoExtracted }),
+      }).catch(() => { /* best-effort */ });
+    } catch { /* best-effort */ }
+  };
+
   // Once statements are safely stored, automated extraction failing must never
   // surface as an error — the files are kept and a human reviews them instead.
   const fallBackToManualReview = async (borrowerId: string, fileNames: string[]) => {
     await supabase.from('borrowers')
       .update({ borrower_status: 'submitted' })
       .eq('id', borrowerId);
+    notifyAeOfReview(borrowerId, fileNames, false);
     setUploadSuccess(
       `We received ${fileNames.join(', ')}. We couldn't automatically read the statement details, ` +
       `so your broker will review them and follow up shortly with your pre-approval. No action needed.`
@@ -443,6 +458,7 @@ export function BorrowerHomePage() {
         await supabase.from('borrowers')
           .update({ borrower_status: 'submitted' })
           .eq('id', borrower.id);
+        notifyAeOfReview(borrower.id, uploadedFileNames, true);
 
         setUploadSuccess(
           `Got it! We extracted $${totalLiquidity.toLocaleString()} in liquidity across ${accounts.length} account(s). ` +

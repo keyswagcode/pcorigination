@@ -222,7 +222,7 @@ serve(async (req) => {
         borrower: {
           firstName,
           lastName,
-          ssn: borrower.ssn_encrypted, // column name is misleading — stored plaintext
+          ssn: (await serviceClient.rpc('fn_decrypt_ssn', { p: borrower.ssn_encrypted })).data, // encrypted at rest; decrypt server-side
           dob: borrower.date_of_birth,
           phone: borrower.phone,
           email: borrower.email,

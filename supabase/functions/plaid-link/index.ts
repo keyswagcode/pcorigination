@@ -330,6 +330,44 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const { action } = body
 
+    // HEALTHCHECK — used by CI to catch Plaid credential/API regressions before
+    // borrowers do. Creates a throwaway Plaid user + link token with a synthetic
+    // identity; returns only {ok}. No data stored, nothing user-facing.
+    if (action === 'healthcheck') {
+      try {
+        const u = await plaidRequest('/user/create', {
+          client_user_id: `healthcheck-${Date.now()}`,
+          identity: {
+            name: { given_name: 'Health', family_name: 'Check' },
+            emails: [{ data: 'healthcheck@keyrealestatecapital.com', primary: true }],
+            phone_numbers: [{ data: '+12125554455', primary: true }],
+            date_of_birth: '1980-01-01',
+            addresses: [{
+              street_1: '5 Main St', city: 'Austin', region: 'TX',
+              postal_code: '78701', country: 'US', primary: true,
+            }],
+          },
+        })
+        const t = await plaidRequest('/link/token/create', {
+          user_id: u.user_id,
+          client_name: 'Key Real Estate Capital',
+          products: ['cra_base_report'],
+          consumer_report_permissible_purpose: 'WRITTEN_INSTRUCTION_PREQUALIFICATION',
+          cra_options: { days_requested: 365 },
+          country_codes: ['US'],
+          language: 'en',
+          webhook: PLAID_WEBHOOK_URL,
+        })
+        return new Response(JSON.stringify({ ok: !!t.link_token }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        return new Response(JSON.stringify({ ok: false, error: (err as Error).message.slice(0, 200) }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     // SWEEP PENDING — invoked by the recovery cron, not a user. Re-checks every
     // borrower stuck in plaid_report_status='pending' (e.g. a missed webhook)
     // and resolves them to ready/error. Unauthenticated like the other internal
@@ -400,7 +438,9 @@ serve(async (req) => {
         .maybeSingle()
 
       const name = splitName(borrower.borrower_name, account?.first_name, account?.last_name)
-      const ssnDigits = (borrower.ssn_encrypted || '').replace(/\D/g, '')
+      // SSNs are encrypted at rest; decrypt server-side (service_role only).
+      const { data: ssnPlain } = await serviceClient.rpc('fn_decrypt_ssn', { p: borrower.ssn_encrypted })
+      const ssnDigits = (typeof ssnPlain === 'string' ? ssnPlain : '').replace(/\D/g, '')
 
       const identity: Record<string, unknown> = { name }
       if (borrower.date_of_birth) identity.date_of_birth = borrower.date_of_birth

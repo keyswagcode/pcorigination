@@ -44,6 +44,7 @@ const InternalPlacerBotPage = lazyWithReload(() => import('./pages/internal/Inte
 const AllLoansPage = lazyWithReload(() => import('./pages/internal/AllLoansPage').then(m => ({ default: m.AllLoansPage })));
 const AllFilesPage = lazyWithReload(() => import('./pages/internal/AllFilesPage').then(m => ({ default: m.AllFilesPage })));
 const AllApplicationsPage = lazyWithReload(() => import('./pages/internal/AllApplicationsPage').then(m => ({ default: m.AllApplicationsPage })));
+const FunnelPage = lazyWithReload(() => import('./pages/internal/FunnelPage').then(m => ({ default: m.FunnelPage })));
 const BorrowerApplyPage = lazyWithReload(() => import('./pages/BorrowerApplyPage').then(m => ({ default: m.BorrowerApplyPage })));
 const BorrowerDocumentsPage = lazyWithReload(() => import('./pages/borrower/BorrowerDocumentsPage').then(m => ({ default: m.BorrowerDocumentsPage })));
 const BorrowerLoansPage = lazyWithReload(() => import('./pages/borrower/BorrowerLoansPage').then(m => ({ default: m.BorrowerLoansPage })));
@@ -236,6 +237,7 @@ function AppRoutes() {
           <Route path="loans" element={<AllLoansPage />} />
           <Route path="files" element={<AllFilesPage />} />
           <Route path="applications" element={<AllApplicationsPage />} />
+          <Route path="funnel" element={<FunnelPage />} />
           <Route path="servicing" element={<AdminServicingListPage />} />
           <Route path="servicing/new" element={<OnboardServicedLoanPage />} />
           <Route path="servicing/:loanId" element={<AdminServicedLoanDetailPage />} />

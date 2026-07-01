@@ -110,8 +110,9 @@ export function BorrowerProfilePage() {
 
       if (data) {
         setBorrower(data);
-        const storedSsn = (data as Record<string, unknown>).ssn_encrypted as string | null;
-        if (storedSsn) setSsnInput(formatSsnDisplay(storedSsn));
+        // SSNs are encrypted at rest — prefill via the self-allowed RPC.
+        const { data: ssnPlain } = await supabase.rpc('get_full_ssn', { p_borrower_id: (data as { id: string }).id });
+        if (typeof ssnPlain === 'string' && ssnPlain) setSsnInput(formatSsnDisplay(ssnPlain));
 
         const { data: prev } = await supabase
           .from('borrower_previous_addresses')
