@@ -91,7 +91,9 @@ export function NewLoanPage() {
     return num ? parseInt(num).toLocaleString() : '';
   };
 
-  const parseCurrency = (value: string) => parseInt(value.replace(/\D/g, '')) || 0;
+  // Parse as a decimal amount, then round to whole dollars. The old digits-only
+  // parseInt turned "1,000,000.50" into 100000050 (100x inflation from cents).
+  const parseCurrency = (value: string) => Math.round(parseFloat(value.replace(/[^0-9.]/g, '')) || 0);
 
   // Auto-calculate LTV when loan amount or value changes
   const value = parseCurrency(propertyValue);

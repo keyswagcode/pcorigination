@@ -158,23 +158,39 @@ export function BrokerBorrowersPage() {
       let success = 0;
       let failed = 0;
 
+      // Build all rows first, then insert in batches — the old per-row insert
+      // meant a 500-row CSV made 500 sequential API calls (minutes).
+      const rows: Record<string, unknown>[] = [];
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',').map(c => c.trim().replace(/^["']|["']$/g, ''));
         const name = cols[nameIdx];
         if (!name) { failed++; continue; }
-
-        const { error } = await supabase.from('borrowers').insert({
+        rows.push({
           broker_id: user.id,
           borrower_name: name,
           email: emailIdx >= 0 ? cols[emailIdx] || null : null,
           phone: phoneIdx >= 0 ? (cols[phoneIdx] || '').replace(/\D/g, '') || null : null,
-          credit_score: creditIdx >= 0 && cols[creditIdx] ? parseInt(cols[creditIdx]) || null : null,
+          credit_score: creditIdx >= 0 && cols[creditIdx] ? parseInt(cols[creditIdx], 10) || null : null,
           entity_type: entityIdx >= 0 ? cols[entityIdx] || 'individual' : 'individual',
           borrower_status: 'draft',
           lifecycle_stage: 'profile_created',
         });
+      }
 
-        if (error) { failed++; } else { success++; }
+      const BATCH = 100;
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const batch = rows.slice(i, i + BATCH);
+        const { error } = await supabase.from('borrowers').insert(batch);
+        if (error) {
+          // Batch failed (e.g. one bad row aborts the batch) — fall back to
+          // per-row for THIS batch so one bad row doesn't sink the rest.
+          for (const row of batch) {
+            const { error: rowErr } = await supabase.from('borrowers').insert(row);
+            if (rowErr) { failed++; } else { success++; }
+          }
+        } else {
+          success += batch.length;
+        }
       }
 
       setCsvResult({ success, failed });

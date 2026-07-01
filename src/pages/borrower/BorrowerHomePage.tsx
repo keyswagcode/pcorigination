@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { usePlaidLink } from 'react-plaid-link';
 import { supabase } from '../../lib/supabase';
@@ -63,6 +63,7 @@ export function BorrowerHomePage() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [creditPullStarted, setCreditPullStarted] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const uploadingRef = useRef(false);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -213,7 +214,12 @@ export function BorrowerHomePage() {
     };
 
     check();
+    let tick = 0;
     const interval = setInterval(async () => {
+      tick++;
+      // Backoff: 5s for the first minute, then effectively 10s — most reports
+      // finish fast; long generations shouldn't hammer the status endpoint.
+      if (Date.now() - startedAt > 60_000 && tick % 2 === 1) return;
       const done = await check();
       if (done) clearInterval(interval);
     }, 5000);
@@ -271,6 +277,13 @@ export function BorrowerHomePage() {
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || !borrower || !user) return;
+    // Guard against double-fire: state updates are async, so a rapid second
+    // change event could start a parallel upload and create a duplicate
+    // submission. A ref flips synchronously.
+    if (uploadingRef.current) return;
+    uploadingRef.current = true;
+    // Reset the input so selecting the same file again re-triggers onChange.
+    const inputEl = e.target;
     setUploadLoading(true);
     setError(null);
     setUploadSuccess(null);
@@ -438,6 +451,8 @@ export function BorrowerHomePage() {
         : 'Upload failed. Please try again or contact your broker.';
       setError(message);
     } finally {
+      uploadingRef.current = false;
+      inputEl.value = '';
       setUploadLoading(false);
     }
   };
@@ -523,8 +538,9 @@ export function BorrowerHomePage() {
     const fixFlipAmount = liquidity * 10;
     const bridgeAmount = liquidity * 5;
 
-    await supabase.from('pre_approvals').delete().eq('borrower_id', borrower.id);
-    await supabase.from('pre_approvals').insert([
+    // Upsert on the (borrower_id, loan_type) unique key — this runs from the
+    // client poll and can race the webhook/sweep writing the same rows.
+    await supabase.from('pre_approvals').upsert([
       {
         borrower_id: borrower.id,
         loan_type: 'dscr',
@@ -564,7 +580,7 @@ export function BorrowerHomePage() {
         machine_decision: 'approved',
         machine_confidence: 95,
       },
-    ]);
+    ], { onConflict: 'borrower_id,loan_type' });
 
     await supabase.from('borrowers')
       .update({ lifecycle_stage: 'pre_approved', borrower_status: 'prequalified' })
