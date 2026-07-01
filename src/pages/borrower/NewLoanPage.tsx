@@ -7,6 +7,7 @@ import {
   Building2, Hammer, Landmark
 } from 'lucide-react';
 import { syncLoanCreatedToGhl } from '../../services/ghlSyncService';
+import { verifyUsAddress } from '../../services/addressService';
 
 type LoanPurpose = 'purchase' | 'refinance' | null;
 type LoanType = 'dscr' | 'fix_flip' | 'bridge' | null;
@@ -40,6 +41,7 @@ export function NewLoanPage() {
   const [propertyCity, setPropertyCity] = useState('');
   const [propertyState, setPropertyState] = useState('');
   const [propertyZip, setPropertyZip] = useState('');
+  const [addressWarned, setAddressWarned] = useState(false);
   const [propertyValue, setPropertyValue] = useState('');
   const [desiredLoanAmount, setDesiredLoanAmount] = useState('');
   const [desiredLtv, setDesiredLtv] = useState('');
@@ -141,15 +143,31 @@ export function NewLoanPage() {
       const ltv = propValue > 0 ? (loanAmount / propValue) * 100 : 0;
       const isRefi = loanPurpose === 'refinance';
 
+      // Verify + standardize the property address (US Census). Warn once on
+      // no-match; a second submit proceeds (new construction may not match).
+      let pStreet = propertyAddress, pCity = propertyCity, pState = propertyState, pZip = propertyZip;
+      if (propertyAddress.trim() && !addressWarned) {
+        const v = await verifyUsAddress({ street: propertyAddress, city: propertyCity, state: propertyState, zip: propertyZip });
+        if (v.verified && v.standardized) {
+          pStreet = v.standardized.street; pCity = v.standardized.city; pState = v.standardized.state; pZip = v.standardized.zip || propertyZip;
+          setPropertyAddress(pStreet); setPropertyCity(pCity); setPropertyState(pState); setPropertyZip(pZip);
+        } else {
+          setAddressWarned(true);
+          setError("We couldn't verify this property address. Double-check it — or submit again to continue with the address as typed.");
+          setIsLoading(false);
+          return;
+        }
+      }
+
       const { data: insertedLoan, error: insertError } = await supabase.from('loan_scenarios').insert({
         borrower_id: borrowerId,
-        scenario_name: `${isRefi ? 'Refinance' : 'Purchase'} - ${propertyAddress || 'New Property'}`,
+        scenario_name: `${isRefi ? 'Refinance' : 'Purchase'} - ${pStreet || 'New Property'}`,
         loan_type: loanType,
         loan_purpose: loanPurpose,
-        property_address: propertyAddress,
-        property_city: propertyCity,
-        property_state: propertyState,
-        property_zip: propertyZip,
+        property_address: pStreet,
+        property_city: pCity,
+        property_state: pState,
+        property_zip: pZip,
         property_type: propertyType || null,
         purchase_price: isRefi ? null : propValue,
         estimated_value: propValue,

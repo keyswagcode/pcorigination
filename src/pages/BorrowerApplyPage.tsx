@@ -9,6 +9,7 @@ import { creditConsentPdfToBlob } from '../lib/creditConsentGenerator';
 import { uploadBorrowerDocument } from '../services/documentService';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { logError } from '../lib/errorLog';
+import { verifyUsAddress } from '../services/addressService';
 
 type Step = 'credentials' | 'profile';
 
@@ -58,6 +59,7 @@ export function BorrowerApplyPage() {
   const [addressZip, setAddressZip] = useState('');
   const [citizenship, setCitizenship] = useState<'us_citizen' | 'permanent_resident' | 'foreign_national'>('us_citizen');
   const [creditConsent, setCreditConsent] = useState(false);
+  const [addressWarned, setAddressWarned] = useState(false);
 
   // Track created user for profile step
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
@@ -204,6 +206,26 @@ export function BorrowerApplyPage() {
     try {
       const ssnDigits = ssn.replace(/\D/g, '');
 
+      // Verify the address against the US Census geocoder and correct it into
+      // the real, standardized address. If it can't be verified, warn once —
+      // a second submit proceeds anyway (new construction may not match yet).
+      let finalStreet = addressStreet, finalCity = addressCity, finalState = addressState, finalZip = addressZip;
+      if (!addressWarned) {
+        const v = await verifyUsAddress({ street: addressStreet, city: addressCity, state: addressState, zip: addressZip });
+        if (v.verified && v.standardized) {
+          finalStreet = v.standardized.street;
+          finalCity = v.standardized.city;
+          finalState = v.standardized.state;
+          finalZip = v.standardized.zip || addressZip;
+          setAddressStreet(finalStreet); setAddressCity(finalCity); setAddressState(finalState); setAddressZip(finalZip);
+        } else {
+          setAddressWarned(true);
+          setError("We couldn't verify this address. Please double-check the street, city, state, and ZIP — or submit again to continue with the address as typed.");
+          setIsLoading(false);
+          return;
+        }
+      }
+
       // Update user_accounts with name
       const { error: updateError } = await supabase
         .from('user_accounts')
@@ -222,11 +244,11 @@ export function BorrowerApplyPage() {
         ssn_last4: ssnDigits.slice(-4),
         ssn_encrypted: ssnDigits, // TODO: encrypt server-side
         credit_score: creditScore ? parseInt(creditScore) : null,
-        address_street: addressStreet,
-        address_city: addressCity,
-        address_state: addressState,
-        address_zip: addressZip,
-        state_of_residence: addressState,
+        address_street: finalStreet,
+        address_city: finalCity,
+        address_state: finalState,
+        address_zip: finalZip,
+        state_of_residence: finalState,
         broker_id: resolvedBrokerId,
         foreign_national: citizenship === 'foreign_national',
         credit_consent: creditConsent,
