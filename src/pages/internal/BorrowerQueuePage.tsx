@@ -54,17 +54,24 @@ export function BorrowerQueuePage() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [lifecycleFilter, setLifecycleFilter] = useState(searchParams.get('stage') || '');
   const [idPendingFilter, setIdPendingFilter] = useState(searchParams.get('id_pending') === 'true');
+  const PAGE = 100;
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
 
   useEffect(() => {
     loadBorrowers();
-  }, [statusFilter, lifecycleFilter, idPendingFilter]);
+  }, [statusFilter, lifecycleFilter, idPendingFilter, page]);
+
+  useEffect(() => { setPage(1); }, [statusFilter, lifecycleFilter, idPendingFilter]);
 
   async function loadBorrowers() {
     setLoading(true);
     try {
+      // Slim select — '*' pulled all 58 columns incl. large jsonb (declarations,
+      // employment, assets) for a list view.
       let query = supabase
         .from('borrowers')
-        .select('*')
+        .select('id, borrower_name, email, phone, credit_score, lifecycle_stage, borrower_status, preferred_loan_type, id_document_verified, broker_id, llc_name, address_street, address_city, state_of_residence, updated_at, created_at', { count: 'exact' })
         .order('updated_at', { ascending: false });
 
       if (statusFilter) {
@@ -79,7 +86,8 @@ export function BorrowerQueuePage() {
         query = query.eq('id_document_verified', false);
       }
 
-      const { data } = await query.limit(100);
+      const { data, count } = await query.range(0, page * PAGE - 1);
+      setTotalCount(count ?? null);
       const rows = (data || []) as BorrowerQueueItem[];
 
       const brokerIds = Array.from(new Set(rows.map(b => b.broker_id).filter((id): id is string => !!id)));
@@ -347,6 +355,17 @@ export function BorrowerQueuePage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {totalCount != null && borrowers.length < totalCount && (
+          <div className="text-center py-4">
+            <button
+              onClick={() => setPage(p => p + 1)}
+              className="px-5 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Load more ({borrowers.length} of {totalCount})
+            </button>
           </div>
         )}
       </div>

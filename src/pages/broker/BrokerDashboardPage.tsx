@@ -112,10 +112,13 @@ export function BrokerDashboardPage() {
         || member?.role === 'admin'
         || member?.role === 'owner';
 
+      // Explicit cap — PostgREST silently truncates at 1000 anyway; the kanban
+      // shows the most recent 500 (newest-first ordering keeps it useful).
       let borrowersQuery = supabase
         .from('borrowers')
         .select('id, borrower_name, email, credit_score, lifecycle_stage, borrower_status, created_at, broker_id, plaid_user_id')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(500);
 
       if (!isAdminLike) {
         if (!member) return;
@@ -144,24 +147,35 @@ export function BrokerDashboardPage() {
 
       setBorrowers(rows);
 
-      // Fetch pending loans + figure out who needs manual pre-approval review
+      // Fetch pending loans + figure out who needs manual pre-approval review.
+      // Chunk the id lists — a single .in() with hundreds of UUIDs overflows
+      // the GET query-string limit.
       if (borrowerData && borrowerData.length > 0) {
         const borrowerIds = borrowerData.map(b => b.id);
-        const [{ data: loans }, { data: bankStmtRows }, { data: preApprovalRows }] = await Promise.all([
-          supabase
+        const CHUNK = 150;
+        const chunks: string[][] = [];
+        for (let i = 0; i < borrowerIds.length; i += CHUNK) chunks.push(borrowerIds.slice(i, i + CHUNK));
+
+        const fetchChunked = async <T,>(build: (ids: string[]) => PromiseLike<{ data: T[] | null }>): Promise<T[]> => {
+          const results = await Promise.all(chunks.map(ids => build(ids)));
+          return results.flatMap(r => r.data || []);
+        };
+
+        const [loans, bankStmtRows, preApprovalRows] = await Promise.all([
+          fetchChunked(ids => supabase
             .from('loan_scenarios')
             .select('id, scenario_name, loan_type, loan_amount, status, borrower_id')
-            .in('borrower_id', borrowerIds)
+            .in('borrower_id', ids)
             .eq('status', 'submitted')
-            .order('created_at', { ascending: false }),
-          supabase
+            .order('created_at', { ascending: false })),
+          fetchChunked(ids => supabase
             .from('bank_statement_accounts')
             .select('borrower_id')
-            .in('borrower_id', borrowerIds),
-          supabase
+            .in('borrower_id', ids)),
+          fetchChunked(ids => supabase
             .from('pre_approvals')
             .select('borrower_id')
-            .in('borrower_id', borrowerIds),
+            .in('borrower_id', ids)),
         ]);
 
         if (loans) {

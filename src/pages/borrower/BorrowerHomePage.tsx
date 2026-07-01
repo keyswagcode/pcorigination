@@ -153,11 +153,12 @@ export function BorrowerHomePage() {
     },
   });
 
-  // Poll for Plaid Check report readiness while pending. First check runs
-  // immediately in case the webhook already landed, then every 5s. CRA reports
-  // aggregate every linked institution and don't finish until the slowest one
-  // does, so a borrower who connects several banks legitimately needs longer —
-  // we wait up to 5 minutes before handing off to the background sweep.
+  // Wait for Plaid Check report readiness while pending. PUSH-first: the
+  // plaid-webhook flips borrowers.plaid_report_status server-side and we get
+  // that row change instantly over Supabase Realtime. A slow 30s fallback poll
+  // remains because get_report_status also performs the server-side recovery
+  // fetch (missed webhooks, report-not-yet-created windows). This replaced a
+  // 5s poll (~60 calls/borrower; thousands/hour at scale).
   useEffect(() => {
     if (!reportPending) return;
     let cancelled = false;
@@ -214,16 +215,28 @@ export function BorrowerHomePage() {
     };
 
     check();
-    let tick = 0;
+
+    // Primary signal: realtime push on the borrower's own row (RLS-scoped).
+    const channel = supabase
+      .channel(`borrower-status-${borrower!.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'borrowers',
+        filter: `id=eq.${borrower!.id}`,
+      }, (payload) => {
+        const status = (payload.new as { plaid_report_status?: string | null })?.plaid_report_status;
+        if (status === 'ready' || status === 'error') check();
+      })
+      .subscribe();
+
+    // Fallback: slow poll — also drives the server-side recovery fetch.
     const interval = setInterval(async () => {
-      tick++;
-      // Backoff: 5s for the first minute, then effectively 10s — most reports
-      // finish fast; long generations shouldn't hammer the status endpoint.
-      if (Date.now() - startedAt > 60_000 && tick % 2 === 1) return;
       const done = await check();
       if (done) clearInterval(interval);
-    }, 5000);
-    return () => { cancelled = true; clearInterval(interval); };
+    }, 30_000);
+
+    return () => { cancelled = true; clearInterval(interval); supabase.removeChannel(channel); };
   }, [reportPending, borrower, loadData]);
 
   // While the Plaid report is generating (it can take a minute), auto-open the

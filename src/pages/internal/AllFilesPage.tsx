@@ -52,13 +52,18 @@ export function AllFilesPage() {
 
   const isAdminLike = userAccount?.user_role === 'admin' || userAccount?.user_role === 'reviewer';
 
+  const PAGE = 100;
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+
   const loadData = useCallback(async () => {
     setIsLoading(true);
-    const { data: docs } = await supabase
+    const { data: docs, count } = await supabase
       .from('uploaded_documents')
-      .select('id, borrower_id, document_type, document_subtype, file_name, file_path, mime_type, file_size, processing_status, created_at')
+      .select('id, borrower_id, document_type, document_subtype, file_name, file_path, mime_type, file_size, processing_status, created_at', { count: 'exact' })
       .order('created_at', { ascending: false })
-      .limit(500);
+      .range(0, page * PAGE - 1);
+    setTotalCount(count ?? null);
 
     if (!docs || docs.length === 0) {
       setFiles([]);
@@ -79,7 +84,7 @@ export function AllFilesPage() {
       borrower_email: byId.get(d.borrower_id)?.email || undefined,
     })));
     setIsLoading(false);
-  }, []);
+  }, [page]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -135,7 +140,7 @@ export function AllFilesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">All Files</h1>
-        <p className="text-gray-500 mt-1">{files.length} files across all borrowers (most recent 500)</p>
+        <p className="text-gray-500 mt-1">{totalCount != null ? `${totalCount} files` : `${files.length} files`} across all borrowers · showing {files.length}</p>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -220,6 +225,17 @@ export function AllFilesPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {totalCount != null && files.length < totalCount && (
+        <div className="text-center">
+          <button
+            onClick={() => setPage(p => p + 1)}
+            className="px-5 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Load more ({files.length} of {totalCount})
+          </button>
         </div>
       )}
     </div>
