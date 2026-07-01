@@ -40,7 +40,11 @@ serve(async (req) => {
     const resendKey = Deno.env.get('RESEND_API_KEY')
     if (!resendKey) return jsonRes({ error: 'Email is not configured (RESEND_API_KEY missing)' }, 500)
 
-    const org = orgName || 'Key Real Estate Capital'
+    // Escape everything interpolated into the email HTML — borrowerName/orgName
+    // come from user input and were previously injected raw.
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const org = esc(orgName || 'Key Real Estate Capital')
+    const safeBorrowerName = borrowerName ? esc(borrowerName) : ''
     const subj = subject || `Commercial Loan Request${borrowerName ? ` — ${borrowerName}` : ''}`
     const file = (fileName || 'commercial_intake.pdf').replace(/[^a-zA-Z0-9._-]+/g, '_')
 
@@ -55,7 +59,7 @@ serve(async (req) => {
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;padding:32px 20px;">
             <h1 style="color:#1a1a1a;font-size:22px;margin:0 0 4px;">${org}</h1>
             <p style="color:#0d9488;font-size:14px;margin:0 0 20px;">Commercial Project Intake &amp; Loan Request</p>
-            <p style="color:#333;font-size:15px;line-height:1.5;">${message ? String(message).replace(/</g, '&lt;') : `Attached is the commercial loan request${borrowerName ? ` for <strong>${borrowerName}</strong>` : ''}. Please review the attached PDF for full project, sponsor, and financing details.`}</p>
+            <p style="color:#333;font-size:15px;line-height:1.5;">${message ? esc(String(message)) : `Attached is the commercial loan request${safeBorrowerName ? ` for <strong>${safeBorrowerName}</strong>` : ''}. Please review the attached PDF for full project, sponsor, and financing details.`}</p>
             <p style="color:#888;font-size:12px;margin-top:24px;">Sent via ${org}.</p>
           </div>`,
         attachments: [{ filename: file, content: pdfBase64 }],

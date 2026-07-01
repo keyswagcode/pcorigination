@@ -110,9 +110,13 @@ async function plaidRequest(endpoint: string, body: Record<string, unknown>) {
       ...body,
     }),
   })
-  const data = await res.json()
+  // Parse defensively — a gateway 502 can return HTML, which res.json() would
+  // turn into an uncaught SyntaxError.
+  const text = await res.text()
+  let data: Record<string, unknown> = {}
+  try { data = text ? JSON.parse(text) : {} } catch { data = { error_message: text.slice(0, 200) } }
   if (!res.ok || data.error_code) {
-    const msg = data.error_message || data.error_code || `Plaid ${endpoint} HTTP ${res.status}`
+    const msg = (data.error_message || data.error_code || `Plaid ${endpoint} HTTP ${res.status}`) as string
     console.error('Plaid error:', { endpoint, status: res.status, data })
     throw new Error(msg)
   }
@@ -429,11 +433,12 @@ serve(async (req) => {
       })
       .eq('id', borrower.id)
 
-    // Step 2: best-effort pre-approval generation.
+    // Step 2: best-effort pre-approval generation. Upsert on the
+    // (borrower_id, loan_type) unique key — idempotent under the poll/webhook/
+    // sweep race that used to create duplicate rows.
     if (totalLiquidity > 0) {
       try {
-        await serviceClient.from('pre_approvals').delete().eq('borrower_id', borrower.id)
-        await serviceClient.from('pre_approvals').insert([
+        await serviceClient.from('pre_approvals').upsert([
           {
             borrower_id: borrower.id,
             loan_type: 'dscr',
@@ -473,9 +478,9 @@ serve(async (req) => {
             machine_decision: 'approved',
             machine_confidence: 95,
           },
-        ])
+        ], { onConflict: 'borrower_id,loan_type' })
       } catch (paErr) {
-        console.warn('Auto pre_approval insert failed (status still ready):', (paErr as Error).message)
+        console.warn('Auto pre_approval upsert failed (status still ready):', (paErr as Error).message)
       }
     }
 

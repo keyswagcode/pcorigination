@@ -224,7 +224,15 @@ async function callOpenAiVision(
 ): Promise<ExtractionResult> {
   console.log(`[VISION][${jobId}] Sending image (${mimeType}) to gpt-4o-mini vision. Bytes: ${fileBytes.length}`);
 
-  const base64Data = btoa(String.fromCharCode(...fileBytes));
+  // Encode in chunks — String.fromCharCode(...bytes) spreads the whole file as
+  // call arguments and throws "Maximum call stack size exceeded" on files over
+  // ~100KB (i.e. every phone photo). Seen in prod on IMG_5721.png.
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < fileBytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...fileBytes.subarray(i, i + CHUNK));
+  }
+  const base64Data = btoa(binary);
   const imageMediaType = mimeType.startsWith("image/") ? mimeType : "image/jpeg";
 
   const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -501,7 +509,14 @@ async function processSubmission(submissionId: string): Promise<{
   let failed = 0;
   const errors: string[] = [];
 
-  for (const job of jobs) {
+  // Process documents with bounded concurrency. Sequential OpenAI calls
+  // (~3-10s each) meant 10+ documents could exceed the edge-function timeout
+  // and strand the submission half-processed; 3-wide keeps memory sane while
+  // cutting wall-clock ~3x.
+  const CONCURRENCY = 3;
+  const queue = [...jobs];
+
+  const runOne = async (job: ProcessingJob) => {
     const { data: doc } = await supabase
       .from("uploaded_documents")
       .select("*")
@@ -512,11 +527,11 @@ async function processSubmission(submissionId: string): Promise<{
       console.error(`[JOB][${job.id}] Document ${job.document_id} not found`);
       errors.push(`Document ${job.document_id} not found`);
       failed++;
-      continue;
+      return;
     }
 
     try {
-      await processDocument(job as ProcessingJob, doc as UploadedDoc);
+      await processDocument(job, doc as UploadedDoc);
       processed++;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -546,7 +561,17 @@ async function processSubmission(submissionId: string): Promise<{
 
       failed++;
     }
-  }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const job = queue.shift();
+        if (!job) break;
+        await runOne(job as ProcessingJob);
+      }
+    }),
+  );
 
   const { data: allJobs } = await supabase
     .from("document_processing_jobs")

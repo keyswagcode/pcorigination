@@ -607,15 +607,14 @@ export function BrokerBorrowerDetailPage() {
         summary: { source: 'broker_manual', total_liquidity: liquidity, verified_at: new Date().toISOString() },
       }, { onConflict: 'borrower_id' });
 
-      // Delete old pre-approvals
-      await supabase.from('pre_approvals').delete().eq('borrower_id', borrower.id);
-
-      // Generate new ones
-      await supabase.from('pre_approvals').insert([
+      // Upsert on the (borrower_id, loan_type) unique key — idempotent, and
+      // can't race with the Plaid poll/webhook/sweep into duplicate rows the
+      // way delete-then-insert did.
+      await supabase.from('pre_approvals').upsert([
         { borrower_id: borrower.id, loan_type: 'dscr', status: 'approved', sub_status: 'pre_approved', prequalified_amount: liquidity * 4, qualification_max: liquidity * 4, verified_liquidity: liquidity, passes_liquidity_check: true, summary: `DSCR Loan: Up to $${(liquidity * 4).toLocaleString()}`, machine_decision: 'approved', machine_confidence: 100 },
         { borrower_id: borrower.id, loan_type: 'fix_flip', status: 'approved', sub_status: 'pre_approved', prequalified_amount: liquidity * 10, qualification_max: liquidity * 10, verified_liquidity: liquidity, passes_liquidity_check: true, summary: `Fix & Flip: Up to $${(liquidity * 10).toLocaleString()}`, machine_decision: 'approved', machine_confidence: 100 },
         { borrower_id: borrower.id, loan_type: 'bridge', status: 'approved', sub_status: 'pre_approved', prequalified_amount: liquidity * 5, qualification_max: liquidity * 5, verified_liquidity: liquidity, passes_liquidity_check: true, summary: `Bridge: Up to $${(liquidity * 5).toLocaleString()}`, machine_decision: 'approved', machine_confidence: 100 },
-      ]);
+      ], { onConflict: 'borrower_id,loan_type' });
 
       // Update borrower status
       await supabase.from('borrowers').update({ lifecycle_stage: 'pre_approved', borrower_status: 'prequalified' }).eq('id', borrower.id);

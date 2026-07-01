@@ -83,9 +83,13 @@ async function plaidRequest(endpoint: string, body: Record<string, unknown>) {
       ...body,
     }),
   })
-  const data = await res.json()
+  // A gateway 502/503 can return HTML — parse defensively so a Plaid outage
+  // surfaces as a clean error instead of a JSON SyntaxError crash.
+  const text = await res.text()
+  let data: Record<string, unknown> = {}
+  try { data = text ? JSON.parse(text) : {} } catch { data = { error_message: text.slice(0, 200) } }
   if (!res.ok || data.error_code) {
-    const msg = data.display_message || data.error_message || data.error_code || `Plaid ${endpoint} HTTP ${res.status}`
+    const msg = (data.display_message || data.error_message || data.error_code || `Plaid ${endpoint} HTTP ${res.status}`) as string
     console.error('Plaid error:', { endpoint, status: res.status, data })
     throw new Error(msg)
   }
@@ -202,8 +206,11 @@ async function processBorrowerReport(serviceClient: any, borrower: { id: string;
 
     if (totalLiquidity > 0) {
       try {
-        await serviceClient.from('pre_approvals').delete().eq('borrower_id', borrower.id)
-        await serviceClient.from('pre_approvals').insert([
+        // Upsert on (borrower_id, loan_type) — the client poll, webhook, and
+        // 15-min sweep can all process the same borrower concurrently; the old
+        // delete-then-insert raced and left duplicate pre-approvals (33 pairs
+        // found in prod). Upsert against the unique key is idempotent.
+        await serviceClient.from('pre_approvals').upsert([
           {
             borrower_id: borrower.id,
             loan_type: 'dscr',
@@ -243,9 +250,9 @@ async function processBorrowerReport(serviceClient: any, borrower: { id: string;
             machine_decision: 'approved',
             machine_confidence: 95,
           },
-        ])
+        ], { onConflict: 'borrower_id,loan_type' })
       } catch (paErr) {
-        console.warn('Auto pre_approval insert failed (status still ready):', (paErr as Error).message)
+        console.warn('Auto pre_approval upsert failed (status still ready):', (paErr as Error).message)
       }
     }
     return { status: 'ready' }
@@ -335,14 +342,26 @@ serve(async (req) => {
         .select('id, plaid_user_id')
         .eq('plaid_report_status', 'pending')
         .not('plaid_user_id', 'is', null)
-      let ready = 0, errored = 0, stillPending = 0
+      // Time-box the run: per-borrower 30s cap (a hung Plaid call can't stall
+      // the loop) and a ~100s wall-clock budget (edge functions die ~150s).
+      // Anything not reached stays 'pending' and the next 15-min run picks it
+      // up — better than the whole sweep dying mid-loop.
+      const startedAt = Date.now()
+      const WALL_BUDGET_MS = 100_000
+      const PER_BORROWER_MS = 30_000
+      let ready = 0, errored = 0, stillPending = 0, skipped = 0
       for (const b of (pending || []) as Array<{ id: string; plaid_user_id: string }>) {
-        const r = await processBorrowerReport(serviceClient, b)
+        if (Date.now() - startedAt > WALL_BUDGET_MS) { skipped++; continue }
+        const r = await Promise.race([
+          processBorrowerReport(serviceClient, b),
+          new Promise<{ status: string }>((resolve) =>
+            setTimeout(() => resolve({ status: 'pending' }), PER_BORROWER_MS)),
+        ])
         if (r.status === 'ready') ready++
         else if (r.status === 'error') errored++
         else stillPending++
       }
-      return new Response(JSON.stringify({ swept: (pending || []).length, ready, errored, stillPending }), {
+      return new Response(JSON.stringify({ swept: (pending || []).length, ready, errored, stillPending, skipped }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
