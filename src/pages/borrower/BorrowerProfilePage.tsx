@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import type { Borrower, BorrowerPreviousAddress } from '../../shared/types';
 import { User, Building2, Save, Loader2, CheckCircle, FileText, UserPlus, Trash2, Send, Eye, EyeOff, Shield, Plus, Home } from 'lucide-react';
+import { verifyUsAddress } from '../../services/addressService';
 
 const LOAN_TYPES = [
   { value: 'bank_statement', label: 'Bank Statement', description: 'Use bank deposits to qualify instead of tax returns' },
@@ -184,6 +185,7 @@ export function BorrowerProfilePage() {
   }
 
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [addressWarned, setAddressWarned] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -198,6 +200,30 @@ export function BorrowerProfilePage() {
     setSaved(false);
 
     try {
+      // Verify + standardize the residential address (US Census). Warn once
+      // on no-match; a second save proceeds with the address as typed.
+      if (borrower.address_street && !addressWarned) {
+        const v = await verifyUsAddress({
+          street: borrower.address_street,
+          city: borrower.address_city || '',
+          state: borrower.address_state || '',
+          zip: borrower.address_zip || '',
+        });
+        if (v.verified && v.standardized) {
+          borrower.address_street = v.standardized.street;
+          borrower.address_city = v.standardized.city;
+          borrower.address_state = v.standardized.state;
+          borrower.address_zip = v.standardized.zip || borrower.address_zip;
+          setBorrower({ ...borrower });
+        } else {
+          setAddressWarned(true);
+          setValidationError("We couldn't verify your address. Double-check the street, city, state, and ZIP — or save again to continue with the address as typed.");
+          setSaving(false);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+      }
+
       const lifecycleStage = borrower.preferred_loan_type && borrower.preferred_loan_type !== 'not_sure'
         ? 'loan_type_selected'
         : 'profile_created';
