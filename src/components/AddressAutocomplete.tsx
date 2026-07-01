@@ -74,8 +74,30 @@ export function AddressAutocomplete({ value, onChange, onAddressSelected, placeh
     if (!GOOGLE_MAPS_KEY) return;
     let cancelled = false;
     loadGoogleMaps()
-      .then(() => { if (!cancelled) setReady(true); })
-      .catch(() => { /* fall through to plain input */ });
+      .then(() => {
+        if (cancelled) return;
+        // The Maps JS script loads even when the Places API is DISABLED on the
+        // Google project — the widget then attaches but silently shows no
+        // suggestions, which also suppressed our fallback. Probe Places once
+        // and only prefer Google when it actually answers.
+        const w = window as unknown as {
+          google?: { maps?: { places?: { AutocompleteService?: new () => {
+            getPlacePredictions: (req: { input: string; componentRestrictions: { country: string } }, cb: (preds: unknown, status: string) => void) => void;
+          } } } };
+        };
+        const Svc = w.google?.maps?.places?.AutocompleteService;
+        if (!Svc) return; // no Places lib → fallback dropdown
+        try {
+          new Svc().getPlacePredictions(
+            { input: '1600 Amphitheatre', componentRestrictions: { country: 'us' } },
+            (_preds, status) => {
+              if (!cancelled && (status === 'OK' || status === 'ZERO_RESULTS')) setReady(true);
+              // REQUEST_DENIED / anything else → stay on the fallback dropdown.
+            },
+          );
+        } catch { /* fallback dropdown */ }
+      })
+      .catch(() => { /* fall through to fallback dropdown */ });
     return () => { cancelled = true; };
   }, []);
 
