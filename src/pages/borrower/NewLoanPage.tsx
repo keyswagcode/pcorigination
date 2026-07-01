@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { syncLoanCreatedToGhl } from '../../services/ghlSyncService';
 import { verifyUsAddress } from '../../services/addressService';
+import { AddressAutocomplete } from '../../components/AddressAutocomplete';
 
 type LoanPurpose = 'purchase' | 'refinance' | null;
 type LoanType = 'dscr' | 'fix_flip' | 'bridge' | null;
@@ -332,7 +333,13 @@ export function NewLoanPage() {
           {/* Address */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Property Address *</label>
-            <input type="text" value={propertyAddress} onChange={e => setPropertyAddress(e.target.value)}
+            <AddressAutocomplete value={propertyAddress} onChange={setPropertyAddress}
+              onAddressSelected={a => {
+                setPropertyAddress(a.street);
+                if (a.city) setPropertyCity(a.city);
+                if (a.state) setPropertyState(a.state);
+                if (a.zip) setPropertyZip(a.zip);
+              }}
               className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent"
               placeholder="123 Main St" required />
             <div className="grid grid-cols-6 gap-2 mt-2">
