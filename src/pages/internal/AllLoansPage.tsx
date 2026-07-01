@@ -50,12 +50,27 @@ export function AllLoansPage() {
     member?.role === 'owner' ||
     member?.role === 'admin';
 
+  // Server-side paged fetch — fetching the whole table silently truncates at
+  // PostgREST's 1000-row cap and gets heavy long before that.
+  const PAGE = 100;
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+
   const loadData = useCallback(async () => {
     setIsLoading(true);
-    const { data: loanData } = await supabase
+    let query = supabase
       .from('loan_scenarios')
-      .select('id, scenario_name, loan_type, loan_purpose, loan_amount, ltv, status, created_at, borrower_id')
-      .order('created_at', { ascending: false });
+      .select('id, scenario_name, loan_type, loan_purpose, loan_amount, ltv, status, created_at, borrower_id', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(0, page * PAGE - 1);
+    if (statusFilter !== 'all') query = query.eq('status', statusFilter);
+    if (search.trim()) {
+      // Search scenario/loan-type server-side; borrower name resolves below.
+      const q = search.trim().replace(/[%_,()]/g, '');
+      query = query.or(`scenario_name.ilike.%${q}%,loan_type.ilike.%${q}%`);
+    }
+    const { data: loanData, count } = await query;
+    setTotalCount(count ?? null);
 
     if (!loanData || loanData.length === 0) {
       setLoans([]);
@@ -76,25 +91,12 @@ export function AllLoansPage() {
       borrower_email: byId.get(l.borrower_id)?.email || undefined,
     })));
     setIsLoading(false);
-  }, []);
+  }, [page, statusFilter, search]);
 
   useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { setPage(1); }, [statusFilter, search]);
 
-  const visibleLoans = loans
-    .filter(l => statusFilter === 'all' || l.status === statusFilter)
-    .filter(l => {
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (l.borrower_name || '').toLowerCase().includes(q)
-        || (l.borrower_email || '').toLowerCase().includes(q)
-        || (l.scenario_name || '').toLowerCase().includes(q)
-        || (l.loan_type || '').toLowerCase().includes(q);
-    });
-
-  const statusCounts = loans.reduce<Record<string, number>>((acc, l) => {
-    acc[l.status] = (acc[l.status] || 0) + 1;
-    return acc;
-  }, {});
+  const visibleLoans = loans;
 
   const fmtCurrency = (n: number | null) =>
     n ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n) : '—';
@@ -121,12 +123,13 @@ export function AllLoansPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">All Loans</h1>
-        <p className="text-gray-500 mt-1">{loans.length} total · all loans across the organization</p>
+        <p className="text-gray-500 mt-1">
+          {totalCount != null ? `${totalCount} matching` : `${loans.length}`} · showing {loans.length}
+        </p>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
         {statuses.map(s => {
-          const count = s === 'all' ? loans.length : statusCounts[s] || 0;
           const isActive = statusFilter === s;
           return (
             <button
@@ -136,7 +139,7 @@ export function AllLoansPage() {
                 isActive ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              {s === 'all' ? 'All' : s.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())} ({count})
+              {s === 'all' ? 'All' : s.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
             </button>
           );
         })}
@@ -149,7 +152,7 @@ export function AllLoansPage() {
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
-          placeholder="Search by borrower, email, scenario, or loan type..."
+          placeholder="Search by scenario name or loan type..."
         />
       </div>
 
@@ -201,6 +204,17 @@ export function AllLoansPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {totalCount != null && loans.length < totalCount && (
+        <div className="text-center">
+          <button
+            onClick={() => setPage(p => p + 1)}
+            className="px-5 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Load more ({loans.length} of {totalCount})
+          </button>
         </div>
       )}
     </div>

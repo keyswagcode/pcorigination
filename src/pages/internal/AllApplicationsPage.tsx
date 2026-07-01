@@ -53,12 +53,15 @@ export function AllApplicationsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const PAGE = 100;
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
 
   const isAdminLike = userAccount?.user_role === 'admin' || userAccount?.user_role === 'reviewer';
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
-    const { data: subs } = await supabase
+    const { data: subs, count } = await supabase
       .from('intake_submissions')
       .select(`
         id,
@@ -70,9 +73,10 @@ export function AllApplicationsPage() {
         updated_at,
         loan_requests (requested_amount, loan_purpose),
         properties (property_address, property_state)
-      `)
+      `, { count: 'exact' })
       .order('created_at', { ascending: false })
-      .limit(500);
+      .range(0, page * PAGE - 1);
+    setTotalCount(count ?? null);
 
     if (!subs || subs.length === 0) {
       setApps([]);
@@ -107,7 +111,7 @@ export function AllApplicationsPage() {
       };
     }));
     setIsLoading(false);
-  }, []);
+  }, [page]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -249,6 +253,17 @@ export function AllApplicationsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {totalCount != null && apps.length < totalCount && (
+        <div className="text-center">
+          <button
+            onClick={() => setPage(p => p + 1)}
+            className="px-5 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Load more ({apps.length} of {totalCount})
+          </button>
         </div>
       )}
     </div>
