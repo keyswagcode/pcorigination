@@ -179,7 +179,17 @@ export function BorrowerApplyPage() {
       }
     } catch (err: unknown) {
       logError('borrower.credentials', err);
-      setError(errorMessage(err));
+      const msg = errorMessage(err);
+      // #1 recurring support issue: people re-registering an existing email,
+      // then failing password guesses. Route them to sign-in with a clear path.
+      if (/already registered/i.test(msg)) {
+        setIsSignUp(false);
+        setError('Good news — this email already has an account. Enter your password to sign in, or tap "Forgot password?" and we\'ll email you a reset link.');
+      } else if (/invalid login credentials/i.test(msg)) {
+        setError('That password doesn\'t match. Try again, or tap "Forgot password?" to reset it.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsLoading(false);
     }

@@ -364,18 +364,29 @@ export function BrokerBorrowerDetailPage() {
     }
   };
 
-  const toggleSSN = (id: string) => {
+  // SSNs are encrypted at rest — reveal fetches the plaintext on demand via
+  // the manager-gated get_full_ssn / get_co_full_ssn RPCs.
+  const [decryptedSSNs, setDecryptedSSNs] = useState<Record<string, string>>({});
+
+  const toggleSSN = (id: string, kind: 'borrower' | 'co' = 'borrower') => {
     setRevealedSSNs(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+    if (!decryptedSSNs[id]) {
+      const rpc = kind === 'co' ? 'get_co_full_ssn' : 'get_full_ssn';
+      const param = kind === 'co' ? { p_co_borrower_id: id } : { p_borrower_id: id };
+      supabase.rpc(rpc, param).then(({ data }) => {
+        if (typeof data === 'string' && data) setDecryptedSSNs(prev => ({ ...prev, [id]: data }));
+      });
+    }
   };
 
-  const formatSSN = (raw: string | null, last4: string | null, revealed: boolean) => {
+  const formatSSN = (id: string, last4: string | null, revealed: boolean) => {
     if (!revealed) return last4 ? `•••-••-${last4}` : '—';
-    const digits = (raw || '').replace(/\D/g, '');
-    if (digits.length !== 9) return '—';
+    const digits = (decryptedSSNs[id] || '').replace(/\D/g, '');
+    if (digits.length !== 9) return last4 ? `•••-••-${last4}` : '—';
     return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
   };
 
@@ -838,9 +849,20 @@ export function BrokerBorrowerDetailPage() {
         realEstate: 'real_estate_owned' in b ? (b.real_estate_owned as URLA1003BorrowerInput['realEstate']) ?? null : null,
       });
 
+      // SSNs are encrypted at rest — the 1003 needs plaintext, fetched via the
+      // manager-gated RPCs at generation time only.
+      const primaryInput = toBorrowerInput(borrower, profile?.monthly_income ?? null, profile?.liquidity_estimate ?? null, previousAddresses);
+      const coInputs = coBorrowers.map(co => toBorrowerInput(co, null, null, []));
+      const { data: primarySsn } = await supabase.rpc('get_full_ssn', { p_borrower_id: borrower.id });
+      if (typeof primarySsn === 'string') primaryInput.ssn = primarySsn;
+      await Promise.all(coBorrowers.map(async (co, i) => {
+        const { data: coSsn } = await supabase.rpc('get_co_full_ssn', { p_co_borrower_id: co.id });
+        if (typeof coSsn === 'string') coInputs[i].ssn = coSsn;
+      }));
+
       const generatorOpts = {
-        primary: toBorrowerInput(borrower, profile?.monthly_income ?? null, profile?.liquidity_estimate ?? null, previousAddresses),
-        coBorrowers: coBorrowers.map(co => toBorrowerInput(co, null, null, [])),
+        primary: primaryInput,
+        coBorrowers: coInputs,
         loan: loanInput,
         orgName,
         brokerName,
@@ -1231,7 +1253,7 @@ export function BrokerBorrowerDetailPage() {
             <label className="text-xs font-medium text-gray-500 uppercase mb-1 block">SSN</label>
             <div className="flex items-center gap-2">
               <p className="text-sm text-gray-900 font-mono">
-                {formatSSN(borrower.ssn_encrypted, borrower.ssn_last4, revealedSSNs.has(borrower.id))}
+                {formatSSN(borrower.id, borrower.ssn_last4, revealedSSNs.has(borrower.id))}
               </p>
               {borrower.ssn_encrypted && (
                 <button
@@ -1292,11 +1314,11 @@ export function BrokerBorrowerDetailPage() {
                           <div className="text-xs text-gray-500 uppercase">SSN</div>
                           <div className="flex items-center gap-2">
                             <span className="text-gray-900 font-mono">
-                              {formatSSN(cb.ssn_encrypted, cb.ssn_last4, revealedSSNs.has(cb.id))}
+                              {formatSSN(cb.id, cb.ssn_last4, revealedSSNs.has(cb.id))}
                             </span>
                             {cb.ssn_encrypted && (
                               <button
-                                onClick={() => toggleSSN(cb.id)}
+                                onClick={() => toggleSSN(cb.id, 'co')}
                                 className="p-1 text-gray-400 hover:text-teal-600 transition-colors"
                                 title={revealedSSNs.has(cb.id) ? 'Hide SSN' : 'Show SSN'}
                               >

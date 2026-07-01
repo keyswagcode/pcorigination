@@ -3,7 +3,15 @@ import { supabase } from './supabaseClient';
 const FUNCTIONS_URL = import.meta.env.VITE_SUPABASE_URL + '/functions/v1';
 
 async function callPlaidFunction(action: string, params: Record<string, unknown> = {}) {
-  const { data: { session } } = await supabase.auth.getSession();
+  let { data: { session } } = await supabase.auth.getSession();
+  // A borrower can sit on the page long enough for the access token to expire
+  // (the recurring "Session from session_id claim in JWT does not exist"
+  // failures). Refresh proactively when the token is expired or about to be.
+  const expiresAt = (session?.expires_at ?? 0) * 1000;
+  if (!session || expiresAt - Date.now() < 60_000) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed.session) session = refreshed.session;
+  }
   if (!session) throw new Error('Not authenticated');
 
   const res = await fetch(`${FUNCTIONS_URL}/plaid-link`, {

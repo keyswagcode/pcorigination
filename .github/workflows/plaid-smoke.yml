@@ -1,0 +1,30 @@
+name: Plaid smoke test
+
+on:
+  schedule:
+    - cron: '0 13 * * *' # daily, 13:00 UTC (~6am PT)
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/functions/plaid-link/**'
+      - 'supabase/functions/plaid-webhook/**'
+  workflow_dispatch:
+
+jobs:
+  plaid-healthcheck:
+    runs-on: ubuntu-latest
+    steps:
+      # Calls the deployed plaid-link healthcheck: creates a throwaway Plaid
+      # user + link token with a synthetic identity. Catches credential/API
+      # regressions (rotated secrets, disabled products, Plaid API changes)
+      # before a borrower does. Returns only {ok} — no secrets needed here.
+      - name: Healthcheck
+        run: |
+          RES=$(curl -s -w '\n%{http_code}' -X POST \
+            "https://nfhvzwzvpielutidqkqp.supabase.co/functions/v1/plaid-link" \
+            -H "Content-Type: application/json" \
+            -d '{"action":"healthcheck"}')
+          BODY=$(echo "$RES" | head -1)
+          CODE=$(echo "$RES" | tail -1)
+          echo "HTTP $CODE — $BODY"
+          echo "$BODY" | grep -q '"ok":true' || { echo "::error::Plaid healthcheck failed"; exit 1; }

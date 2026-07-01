@@ -14,7 +14,8 @@ import {
   Briefcase,
   FileText,
   ClipboardList,
-  PiggyBank
+  PiggyBank,
+  TrendingUp
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -32,6 +33,7 @@ const adminNavItems = [
   { to: '/internal/loans', icon: Briefcase, label: 'All Loans' },
   { to: '/internal/files', icon: FileText, label: 'All Files' },
   { to: '/internal/servicing', icon: PiggyBank, label: 'Loan Servicing' },
+  { to: '/internal/funnel', icon: TrendingUp, label: 'Funnel' },
   { to: '/internal/placerbot', icon: Bot, label: 'PlacerBot' },
   { to: '/internal/settings', icon: Settings, label: 'Settings' },
 ];
