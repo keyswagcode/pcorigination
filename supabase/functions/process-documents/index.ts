@@ -577,15 +577,21 @@ async function processDocument(
     })
     .eq("id", job.id);
 
-  await supabase
+  // classification_confidence lives on document_processing_jobs, NOT on
+  // uploaded_documents — including it here made this update silently fail for
+  // every document, stranding them all in "processing" (65 rows backfilled
+  // 2026-07-02). Error is now checked so a schema drift can't hide again.
+  const { error: docUpdateError } = await supabase
     .from("uploaded_documents")
     .update({
       processing_status: needsReview ? "needs_review" : "completed",
       extraction_status: "completed",
-      classification_confidence: extracted.confidence,
       is_processed: true,
     })
     .eq("id", doc.id);
+  if (docUpdateError) {
+    throw new Error(`final uploaded_documents update failed: ${docUpdateError.message}`);
+  }
 
   console.log(`[JOB][${job.id}] COMPLETE in ${Date.now() - processingStartMs}ms`);
 }
@@ -703,10 +709,14 @@ async function processSubmission(submissionId: string): Promise<{
         .eq("id", job.id);
 
       if (isFinalFailure) {
+        // The statement itself is safely stored — a hard extraction failure
+        // must land in the manual-review queue with the AE pinged, never in a
+        // dead "failed" state nobody is watching.
         await supabase
           .from("uploaded_documents")
-          .update({ processing_status: "failed", error_message: message })
+          .update({ processing_status: "needs_review", error_message: message })
           .eq("id", doc.id);
+        await alertAeManualReview(doc as UploadedDoc, job.id);
       }
 
       failed++;

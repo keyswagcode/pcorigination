@@ -73,6 +73,26 @@ serve(async (req) => {
       })
     }
 
+    // Failure alerts share a 1-hour dedup window with process-documents'
+    // server-side alert (same activity-log event), so a statement that both
+    // paths flag doesn't email the AE twice.
+    if (!auto_extracted) {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      const { data: recentAlert } = await serviceClient
+        .from('borrower_activity_log')
+        .select('id')
+        .eq('borrower_id', borrower.id)
+        .eq('event_type', 'manual_review_alert')
+        .gte('created_at', oneHourAgo)
+        .limit(1)
+        .maybeSingle()
+      if (recentAlert) {
+        return new Response(JSON.stringify({ ok: true, deduped: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
     const name = esc(borrower.borrower_name || 'A borrower')
     const files = Array.isArray(file_names) ? file_names.slice(0, 10).map((f: unknown) => esc(String(f))).join(', ') : ''
     const detail = auto_extracted
@@ -97,6 +117,15 @@ serve(async (req) => {
           </div>`,
       }),
     })
+
+    if (res.ok && !auto_extracted) {
+      await serviceClient.from('borrower_activity_log').insert({
+        borrower_id: borrower.id,
+        event_type: 'manual_review_alert',
+        title: 'AE alerted: statements need manual read',
+        details: `Statements could not be read automatically; emailed ${ae.email}`,
+      })
+    }
 
     return new Response(JSON.stringify({ ok: res.ok }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
