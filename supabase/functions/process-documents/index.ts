@@ -1,9 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.39.7";
 
-console.log("=== FUNCTION STARTED (v9.0-openai-files) ===");
+console.log("=== FUNCTION STARTED (v10.0-claude-primary) ===");
 console.log("[ENV CHECK] SUPABASE_URL:", Deno.env.get("SUPABASE_URL") ? "SET" : "MISSING");
 console.log("[ENV CHECK] SUPABASE_SERVICE_ROLE_KEY:", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ? "SET" : "MISSING");
+console.log("[ENV CHECK] ANTHROPIC_API_KEY:", Deno.env.get("ANTHROPIC_API_KEY") ? "SET" : "MISSING");
 console.log("[ENV CHECK] OPEN_AI:", Deno.env.get("OPEN_AI") ? "SET (" + (Deno.env.get("OPEN_AI") || "").slice(0, 7) + "...)" : "MISSING");
 
 const corsHeaders = {
@@ -14,6 +15,7 @@ const corsHeaders = {
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY") || "";
 const openAiKey = Deno.env.get("OPEN_AI") || "";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -135,6 +137,68 @@ function parseOpenAiContent(content: string, jobId: string): ExtractionResult {
   }
 }
 
+// Encode in chunks — String.fromCharCode(...bytes) spreads the whole file as
+// call arguments and throws "Maximum call stack size exceeded" on files over
+// ~100KB (i.e. every phone photo). Seen in prod on IMG_5721.png.
+function toBase64(fileBytes: Uint8Array): string {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < fileBytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...fileBytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// Primary extractor: Anthropic Messages API reads PDFs and images natively in
+// a single call — no separate file-upload step to fail like OpenAI's Files API.
+async function callClaude(
+  fileBytes: Uint8Array,
+  mimeType: string,
+  fileName: string,
+  jobId: string,
+): Promise<ExtractionResult> {
+  const isPdf = mimeType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
+  console.log(`[CLAUDE][${jobId}] Sending ${isPdf ? "PDF" : mimeType} (${fileBytes.length} bytes) to claude-sonnet-5`);
+
+  const base64Data = toBase64(fileBytes);
+  const fileBlock = isPdf
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Data } }
+    : {
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: mimeType.startsWith("image/") ? mimeType : "image/jpeg",
+        data: base64Data,
+      },
+    };
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": anthropicKey,
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-5",
+      max_tokens: 1500,
+      messages: [{ role: "user", content: [fileBlock, { type: "text", text: EXTRACTION_PROMPT }] }],
+    }),
+  });
+
+  const resText = await res.text();
+  console.log(`[CLAUDE][${jobId}] HTTP ${res.status}:`, resText.slice(0, 300));
+  if (!res.ok) return buildFallbackResult();
+
+  const data = JSON.parse(resText);
+  const content = data.content?.find((c: { type: string }) => c.type === "text")?.text ?? "";
+  if (!content) {
+    console.error(`[CLAUDE][${jobId}] No text content in response`);
+    return buildFallbackResult();
+  }
+  return parseOpenAiContent(content, jobId);
+}
+
 async function callOpenAiFileApi(
   fileBytes: Uint8Array,
   fileName: string,
@@ -224,15 +288,7 @@ async function callOpenAiVision(
 ): Promise<ExtractionResult> {
   console.log(`[VISION][${jobId}] Sending image (${mimeType}) to gpt-4o-mini vision. Bytes: ${fileBytes.length}`);
 
-  // Encode in chunks — String.fromCharCode(...bytes) spreads the whole file as
-  // call arguments and throws "Maximum call stack size exceeded" on files over
-  // ~100KB (i.e. every phone photo). Seen in prod on IMG_5721.png.
-  let binary = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < fileBytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...fileBytes.subarray(i, i + CHUNK));
-  }
-  const base64Data = btoa(binary);
+  const base64Data = toBase64(fileBytes);
   const imageMediaType = mimeType.startsWith("image/") ? mimeType : "image/jpeg";
 
   const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -278,26 +334,119 @@ async function callOpenAiVision(
   return parseOpenAiContent(content, jobId);
 }
 
+// Claude first, OpenAI as fallback. A provider "failed" when it errored or
+// returned the low-confidence fallback shape — in that case the other provider
+// gets a shot before we give up and route to manual review.
 async function extractDocument(
   fileBytes: Uint8Array,
   mimeType: string,
   fileName: string,
   jobId: string,
 ): Promise<ExtractionResult> {
-  if (!openAiKey) {
-    console.error(`[EXTRACT][${jobId}] OPEN_AI env var is EMPTY — cannot call OpenAI`);
+  if (!anthropicKey && !openAiKey) {
+    console.error(`[EXTRACT][${jobId}] No AI provider configured (ANTHROPIC_API_KEY and OPEN_AI both empty)`);
     return buildFallbackResult();
   }
 
   const isPdf = mimeType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
   console.log(`[EXTRACT][${jobId}] isPdf: ${isPdf}, mimeType: ${mimeType}, fileName: ${fileName}`);
 
-  if (isPdf) {
-    console.log(`[EXTRACT][${jobId}] PDF path: uploading to OpenAI Files API`);
-    return await callOpenAiFileApi(fileBytes, fileName, jobId);
-  } else {
-    console.log(`[EXTRACT][${jobId}] Image path: sending to OpenAI vision`);
-    return await callOpenAiVision(fileBytes, mimeType, jobId);
+  let result = buildFallbackResult();
+
+  if (anthropicKey) {
+    try {
+      result = await callClaude(fileBytes, mimeType, fileName, jobId);
+    } catch (err) {
+      console.error(`[EXTRACT][${jobId}] Claude threw:`, err instanceof Error ? err.message : err);
+    }
+    if (result.confidence >= 0.3) return result;
+    console.warn(`[EXTRACT][${jobId}] Claude result unusable (confidence ${result.confidence}) — trying OpenAI fallback`);
+  }
+
+  if (openAiKey) {
+    try {
+      const openAiResult = isPdf
+        ? await callOpenAiFileApi(fileBytes, fileName, jobId)
+        : await callOpenAiVision(fileBytes, mimeType, jobId);
+      if (openAiResult.confidence > result.confidence) result = openAiResult;
+    } catch (err) {
+      console.error(`[EXTRACT][${jobId}] OpenAI threw:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  return result;
+}
+
+// Email the borrower's AE when extraction couldn't read a statement and it
+// lands in the manual-review queue. Runs server-side so the alert fires no
+// matter which path triggered processing (the portal's client-side ping only
+// covers the case where this whole function throws). Deduped to one email per
+// borrower per hour via borrower_activity_log so multi-statement uploads
+// don't spam.
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+async function alertAeManualReview(doc: UploadedDoc, jobId: string): Promise<void> {
+  try {
+    const resendKey = Deno.env.get("RESEND_API_KEY");
+    if (!resendKey || !doc.borrower_id) return;
+
+    const { data: borrower } = await supabase
+      .from("borrowers")
+      .select("id, borrower_name, email, broker_id")
+      .eq("id", doc.borrower_id)
+      .maybeSingle();
+    if (!borrower?.broker_id) return;
+
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { data: recentAlert } = await supabase
+      .from("borrower_activity_log")
+      .select("id")
+      .eq("borrower_id", borrower.id)
+      .eq("event_type", "manual_review_alert")
+      .gte("created_at", oneHourAgo)
+      .limit(1)
+      .maybeSingle();
+    if (recentAlert) {
+      console.log(`[ALERT][${jobId}] AE already alerted within the hour — skipping`);
+      return;
+    }
+
+    const { data: ae } = await supabase
+      .from("user_accounts")
+      .select("email, first_name")
+      .eq("id", borrower.broker_id)
+      .maybeSingle();
+    if (!ae?.email) return;
+
+    const name = esc(borrower.borrower_name || "A borrower");
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${resendKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: "Key Real Estate Capital <noreply@keyrealestatecapital.com>",
+        to: [ae.email],
+        subject: `Manual read needed: ${borrower.borrower_name || "borrower"}'s bank statement couldn't be read automatically`,
+        html: `
+          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;padding:32px 20px;">
+            <h1 style="color:#1a1a1a;font-size:20px;margin:0 0 4px;">Manual read needed</h1>
+            <p style="color:#0d9488;font-size:13px;margin:0 0 20px;">Loan Center · bank statement review queue</p>
+            <p style="color:#333;font-size:15px;line-height:1.6;"><strong>${name}</strong>${borrower.email ? ` (${esc(borrower.email)})` : ""} uploaded a bank statement that automated extraction couldn't read (file: ${esc(doc.file_name)}). Please open the file, read the balances, and set liquidity so the pre-approval can go out.</p>
+            <a href="https://pcorigination.vercel.app/internal/my-borrowers/${borrower.id}" style="display:inline-block;margin-top:12px;padding:10px 20px;background:#0d9488;color:#fff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;">Open borrower file</a>
+            <p style="color:#999;font-size:12px;margin-top:24px;">Sent automatically when a statement enters the review queue.</p>
+          </div>`,
+      }),
+    });
+    console.log(`[ALERT][${jobId}] AE alert email → HTTP ${res.status}`);
+
+    await supabase.from("borrower_activity_log").insert({
+      borrower_id: borrower.id,
+      event_type: "manual_review_alert",
+      title: "AE alerted: statement needs manual read",
+      details: `Automated extraction couldn't read ${doc.file_name}; emailed ${ae.email}`,
+    });
+  } catch (err) {
+    // Alerting must never fail the job itself.
+    console.error(`[ALERT][${jobId}] alert failed:`, err instanceof Error ? err.message : err);
   }
 }
 
@@ -354,6 +503,7 @@ async function processDocument(
     (Number(extracted.closing_balance) || 0) === 0;
   if (needsReview) {
     console.warn(`[JOB][${job.id}] Flagging needs_review (confidence ${extracted.confidence}, bank "${extracted.bank_name}")`);
+    await alertAeManualReview(doc, job.id);
   }
 
   const { data: existingAccount } = await supabase
@@ -393,9 +543,9 @@ async function processDocument(
     withdrawal_count: extracted.withdrawal_count,
     extraction_confidence: extracted.confidence,
     needs_review: needsReview,
-    extraction_version: "9.0-openai-files",
+    extraction_version: "10.0-claude-primary",
     raw_extracted_data: {
-      extraction_method: doc.mime_type === "application/pdf" ? "openai_files_api" : "openai_vision",
+      extraction_method: anthropicKey ? "claude_messages_api" : "openai_fallback",
       llm_extraction: extracted,
     },
   };
