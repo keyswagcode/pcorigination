@@ -173,20 +173,6 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'No authorization header' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: authError } = await serviceClient.auth.getUser(token)
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
     const locationId = Deno.env.get('GHL_LOCATION_ID') || ''
     if (!locationId) {
       return new Response(JSON.stringify({ error: 'GHL_LOCATION_ID not configured' }), {
@@ -194,8 +180,95 @@ serve(async (req) => {
       })
     }
 
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
     const { action, borrower_id, loan_id } = body
+
+    // sync_stages is cron-invoked (no user JWT), takes no input, and returns
+    // only counts — same security model as the other internal crons. All
+    // other actions require the caller's session below.
+    let user: { id: string } | null = null
+    if (action !== 'sync_stages') {
+      const authHeader = req.headers.get('Authorization')
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: 'No authorization header' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const token = authHeader.replace('Bearer ', '')
+      const { data, error: authError } = await serviceClient.auth.getUser(token)
+      if (authError || !data.user) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      user = data.user
+    }
+
+    // SYNC STAGES — cron-invoked, one-way GHL -> loanflow. Reads each linked
+    // opportunity's current pipeline stage and maps it onto
+    // loan_scenarios.status. Loanflow NEVER writes stages back to GHL.
+    if (action === 'sync_stages') {
+      const STAGE_TO_STATUS: Record<string, string> = {
+        'New Loan Leads': 'submitted',
+        'Pricing': 'under_review',
+        'Awaiting Docs': 'under_review',
+        'Order Appraisal': 'under_review',
+        'Appraisal Ordered': 'under_review',
+        'Order Title | Insurance': 'under_review',
+        'Processing': 'under_review',
+        'Processing | Submission': 'under_review',
+        'Underwriting': 'under_review',
+        'Conditional Approval': 'approved',
+        'Resubmitted': 'under_review',
+        'Clear to Close': 'approved',
+        'Closed': 'closed',
+        'Wire Received': 'closed',
+        'On Hold': 'under_review',
+        'Cancelled': 'declined',
+      }
+
+      // Stage-id -> name lookup from the live pipelines.
+      const pipes = await ghlRequest('GET', `/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`)
+      const stageName: Record<string, string> = {}
+      for (const p of ((pipes.data as { pipelines?: Pipeline[] } | null)?.pipelines || [])) {
+        for (const st of (p.stages || [])) {
+          if (st.id && st.name) stageName[st.id] = st.name
+        }
+      }
+
+      const { data: loans } = await serviceClient
+        .from('loan_scenarios')
+        .select('id, status, ghl_opportunity_id, ghl_stage_name')
+        .not('ghl_opportunity_id', 'is', null)
+        .not('status', 'in', '("closed","declined")')
+      let checked = 0, updated = 0, failed = 0
+      const startedAt = Date.now()
+      for (const loan of (loans || []) as Array<{ id: string; status: string; ghl_opportunity_id: string; ghl_stage_name: string | null }>) {
+        if (Date.now() - startedAt > 100_000) break // stay under the edge timeout
+        try {
+          const res = await ghlRequest('GET', `/opportunities/${loan.ghl_opportunity_id}`)
+          const opp = ((res.data as Record<string, unknown> | null)?.opportunity || res.data) as Record<string, unknown> | null
+          const sid = (opp?.pipelineStageId as string | undefined) || ''
+          const name = stageName[sid]
+          checked++
+          if (!name) continue
+          const mapped = STAGE_TO_STATUS[name]
+          if (name !== loan.ghl_stage_name || (mapped && mapped !== loan.status)) {
+            await serviceClient
+              .from('loan_scenarios')
+              .update({ ghl_stage_name: name, ...(mapped ? { status: mapped } : {}) })
+              .eq('id', loan.id)
+            updated++
+          }
+        } catch (e) {
+          failed++
+          console.warn('sync_stages failed for', loan.ghl_opportunity_id, (e as Error).message.slice(0, 80))
+        }
+      }
+      return new Response(JSON.stringify({ checked, updated, failed }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
     // Staff-only: enumerate the GHL location's users so admins can populate
     // user_accounts.ghl_user_id when email matching fails.
@@ -203,7 +276,7 @@ serve(async (req) => {
       const { data: acct } = await serviceClient
         .from('user_accounts')
         .select('user_role')
-        .eq('id', user.id)
+        .eq('id', user!.id)
         .maybeSingle()
       if (!acct || !['admin', 'reviewer'].includes(acct.user_role || '')) {
         return new Response(JSON.stringify({ error: 'Forbidden' }), {
@@ -345,6 +418,8 @@ serve(async (req) => {
           })
           if (opp.id) {
             opportunityId = opp.id
+            // Persist for the GHL->loanflow stage sync (GHL is source of truth).
+            await serviceClient.from('loan_scenarios').update({ ghl_opportunity_id: opp.id }).eq('id', loan.id)
             opportunityNote = ` · opportunity ${opp.id} (${loanTypeLabel}, $${(Number(loan.loan_amount) || 0).toLocaleString()})`
           } else {
             opportunityNote = ` · opportunity create failed: ${opp.error || 'unknown'}`
@@ -354,7 +429,7 @@ serve(async (req) => {
 
       await serviceClient.from('borrower_activity_log').insert({
         borrower_id,
-        user_id: user.id,
+        user_id: user!.id,
         event_type: 'ghl_synced',
         title: 'Synced to GoHighLevel',
         details: `Contact ${upsert.contactId} · ${upsert.created ? 'created' : 'updated'} · tag: ${tag}${ghlUserId ? ` · assignedTo broker user ${ghlUserId}` : ' · no broker user match'}${opportunityNote}`,
@@ -372,7 +447,7 @@ serve(async (req) => {
       console.error('GHL sync failed:', msg)
       await serviceClient.from('borrower_activity_log').insert({
         borrower_id,
-        user_id: user.id,
+        user_id: user!.id,
         event_type: 'ghl_sync_failed',
         title: 'GoHighLevel sync failed',
         details: msg,
