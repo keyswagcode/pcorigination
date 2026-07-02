@@ -195,6 +195,11 @@ async function processBorrowerReport(serviceClient: any, borrower: { id: string;
       },
     }, { onConflict: 'borrower_id' })
 
+    // DTI-based Primary Residence pre-approval (no-ops unless income + debt both known).
+    if (income.monthlyIncome > 0 && monthlyDebt > 0) {
+      await serviceClient.rpc('fn_upsert_primary_preapproval', { p_borrower_id: borrower.id })
+    }
+
     await serviceClient
       .from('borrowers')
       .update({

@@ -584,7 +584,7 @@ export function BrokerBorrowerDetailPage() {
         contentType: file.type || 'application/octet-stream',
         upsert: false,
       });
-      await supabase.from('uploaded_documents').insert({
+      const { data: inserted } = await supabase.from('uploaded_documents').insert({
         borrower_id: borrower.id,
         document_type: category,
         document_subtype: category,
@@ -593,7 +593,15 @@ export function BrokerBorrowerDetailPage() {
         mime_type: file.type,
         file_size: file.size,
         processing_status: 'uploaded',
-      });
+      }).select('id').single();
+      // Credit reports feed the DTI calc → Primary Residence pre-approval.
+      if (category === 'credit_report' && inserted?.id) {
+        supabase.functions.invoke('extract-credit-debts', {
+          body: { document_id: inserted.id },
+        }).then(({ data }) => {
+          if (data?.ok) loadData();
+        }).catch(() => { /* extraction is best-effort; report stays uploaded */ });
+      }
       await loadData();
     } catch (err) {
       console.error('Upload failed:', err);
@@ -1365,6 +1373,7 @@ export function BrokerBorrowerDetailPage() {
 
       {activeTab === 'documents' && (() => {
         const allCategories = [
+          { key: 'credit_report', label: 'Credit Report' },
           { key: 'drivers_license', label: "Driver's License / Passport" },
           { key: 'voided_check', label: 'Voided Check' },
           { key: 'property_insurance', label: 'Property Insurance' },

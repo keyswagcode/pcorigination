@@ -393,6 +393,11 @@ serve(async (req) => {
       if (dti != null) { profileUpdate.dti = dti; profileUpdate.dti_computed_at = new Date().toISOString() }
       await serviceClient.from('borrower_financial_profiles').upsert(profileUpdate, { onConflict: 'borrower_id' })
 
+      // DTI-based Primary Residence pre-approval (no-ops unless income + debt both known).
+      if (monthlyDebt != null) {
+        await serviceClient.rpc('fn_upsert_primary_preapproval', { p_borrower_id: borrower_id })
+      }
+
       if (mid) {
         await serviceClient.from('borrowers').update({ credit_score: mid }).eq('id', borrower_id)
       }
